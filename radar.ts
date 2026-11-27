@@ -628,6 +628,30 @@ async function fetchT3Projects(user: User): Promise<Obj[] | null> {
 }
 
 /**
+ * T3 threads snoozed right now, with the PRs each one links, or null when there's no MCP URL.
+ * Snoozing a thread in T3 parks its PRs here too, until the snooze ends or you unsnooze it.
+ */
+async function fetchT3Snoozed(user: User): Promise<Obj[] | null> {
+  const url = t3McpUrl(user);
+  if (!url) return null;
+  const out: Obj[] = [];
+  let cursor: number | null = null;
+  for (let page = 0; page < 10; page++) {
+    const r: Obj = await mcpCall(url, "t3_thread_list",
+      { allProjects: true, snoozed: true, limit: 100, ...(cursor === null ? {} : { cursor }) });
+    for (const t of r.threads ?? []) {
+      const prs = (t.pullRequests ?? [])
+        .filter((pr: Obj) => (pr.host ?? "github.com") === "github.com" && pr.repository && pr.number)
+        .map((pr: Obj) => `${pr.repository}#${pr.number}`.toLowerCase());
+      if (t.snoozed && prs.length) out.push({ id: t.threadId, title: t.title ?? "", link: t.link ?? "", until: t.snoozedUntil ?? null, prs });
+    }
+    cursor = r.nextCursor ?? null;
+    if (cursor === null) break;
+  }
+  return out;
+}
+
+/**
  * A repo's T3 badge: its project's icon if set, else T3's monogram for the project title, or for the
  * repo name when no T3 project has that repo. Several projects can share a repo (a subfolder opened
  * as its own project); the one opened at the repo root wins, then the oldest.
@@ -661,6 +685,8 @@ async function refresh(user: User, sendNotifications = false, forceFull = false)
     const full = forceFull || !lastFull || now().getTime() - parse(lastFull)!.getTime() > FULL_EVERY_HOURS * HOUR;
     // T3's project list for the badges, alongside GitHub; a failure keeps the cached list
     const t3Projects = fetchT3Projects(user).catch((e: Error) => { console.error("T3 projects:", e.message); return null; });
+    // T3's snoozed threads, so their PRs park here too; a failure keeps the last list
+    const t3Snoozed = fetchT3Snoozed(user).catch((e: Error) => { console.error("T3 snoozed threads:", e.message); return null; });
     const { nodes: light, rate } = await searchAll(`org:${org} is:pr is:open archived:false`, LIGHT_FIELDS, 100);
     const t = iso(now());
     const ignore = new Set<string>(profile.ignoreRepos ?? []);
@@ -692,6 +718,8 @@ async function refresh(user: User, sendNotifications = false, forceFull = false)
     }
     const projects = await t3Projects;
     if (projects) storeProjects(db, projects);
+    const snoozed = await t3Snoozed;
+    if (snoozed) metaSet(db, "t3Snoozed", { at: iso(now()), threads: snoozed });
     const firstRefresh = !metaGet(db, "lastRefresh");
     const newEvents: [string, string, string, string, Obj][] = [];
     transaction(db, () => {
@@ -797,6 +825,19 @@ function buildBoard(user: User): Obj {
     const notes = new Map<string, Obj>(all(db, "select * from notes").map((r) =>
       [r.key, { basis: r.basis, next: r.next, left: r.left_, question: r.question, why: r.why, at: r.at }]));
     const tri = new Map<string, Obj>(all(db, "select * from triage").map((r) => [r.key, { ...r }]));
+    // PRs whose T3 thread is snoozed: the snooze that ends last wins; an open-ended one ("until" null) beats all
+    const t3Snooze = new Map<string, Obj>();
+    const nowIso = iso(now());
+    for (const t of metaGet<Obj>(db, "t3Snoozed", null)?.threads ?? []) {
+      if (t.until && t.until <= nowIso) continue;
+      const m = /t3-thread:\/\/v2\/([^/]+)\//.exec(t.link || "");
+      const env = m ? m[1] : defaultEnv;
+      const s = { until: t.until, title: t.title, openUrl: env ? t3ThreadUrl(env, t.id) : null };
+      for (const key of t.prs) {
+        const prev = t3Snooze.get(key);
+        if (!prev || (prev.until && (!s.until || s.until > prev.until))) t3Snooze.set(key, s);
+      }
+    }
     const lastSeen = metaGet<string>(db, "lastViewed", "") ?? "";
     const events: Obj[] = all(db, "select * from events order by id desc limit 60").map((r) => ({ ...r, new: r.at > lastSeen }));
     const byKey = new Map(rows.map((i) => [i.key, i]));
@@ -815,7 +856,9 @@ function buildBoard(user: User): Obj {
       out.note = notes.get(item.key) ?? null;
       out.threads = threads.get(item.key.toLowerCase()) ?? [];
       out.triage = tri.get(item.key) ?? null;
-      out.hidden = hidden(item, tri.get(item.key));
+      out.t3Snooze = t3Snooze.get(item.key.toLowerCase()) ?? null;
+      out.hiddenBy = hidden(item, tri.get(item.key)) ? "radar" : out.t3Snooze ? "t3" : null;
+      out.hidden = !!out.hiddenBy;
       out.events = events.filter((e) => e.key === item.key).map((e) => e.text).slice(0, 3);
       return out;
     };

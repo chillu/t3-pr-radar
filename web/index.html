@@ -421,7 +421,10 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
     age.append(el("span", null, d == null ? "" : Math.round(d) + "d"));
 
     const acts = el("div", "acts");
-    if (g === "parked") {
+    if (g === "parked" && i.hiddenBy === "t3") {
+      // snoozed in T3, not here: unsnooze the thread in T3 to bring it back
+      acts.append(el("span", "pnote", "Snoozed in T3 " + (i.t3Snooze.until ? "until " + untilText(i.t3Snooze.until) : "for now")), t3Button(i));
+    } else if (g === "parked") {
       const tr = i.triage || {};
       acts.append(el("span", "pnote", tr.action === "snooze" ? "Snoozed until " + untilText(tr.until)
         : "Settled " + (minsAgo(tr.at) || "") + ", back when it changes"));
