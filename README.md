@@ -11,6 +11,33 @@ It's a page at http://127.0.0.1:7424, served by `radar.ts` from a SQLite file.
 Nothing is hosted, and nothing is installed: it needs Node 24 or later, `gh` and,
 for sweeps, the `claude` CLI.
 
+## Why it exists
+
+Most of my pending work lives in T3 Code threads, across several repos and
+across work that has no repo at all, like vendor security reviews. I switch
+context by project: pick one, see what's left there, work through it. T3 keeps
+that list honest without extra UI. It settles threads when their PR merges,
+lets me snooze threads so the list doesn't overwhelm me, and hides threads
+that are still working and don't need me. pr-radar adds the piece T3 doesn't
+have: which PRs across the org need me, and in what order.
+
+### How I run it in T3
+
+- The pr-radar project is pinned, so it's always at the top of the sidebar, one keyboard shortcut away.
+- The project's built-in browser panel shows the page. T3 keeps that panel per project, so I can widen it for pr-radar alone.
+- The project holds one otherwise empty thread. Claude in that thread has the radar's context, so I can ask it about what the page shows. Mostly I just read the page.
+
+It's a bit of a hack to get this kind of view into T3 Code, but it works
+because the pieces fit together. The same approach should work anywhere that
+can show a local page next to an agent, such as Claude Desktop.
+
+### Why it's this small
+
+One file does the work with tools that are already on the machine: `gh` for
+fetching, the `claude` CLI for sweeps, and Node for serving. The page is a
+static file. The only reason it needs a server at all is the SQLite
+connection.
+
 ## Two cadences
 
 | | What | How often | Cost |
