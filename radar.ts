@@ -1109,6 +1109,46 @@ async function fetchAvatar(login: string): Promise<Buffer | null> {
   return null;
 }
 
+// ---------------------------------------------------------------- project icons
+
+// A T3 project icon is a Lucide icon name, and T3's Lucide still draws old names (globe-2 is drawn
+// as earth). The server resolves a name through lucide-react's export list, which carries the
+// aliases, fetches the SVG from lucide-static once and serves it from users/<user>/icons/.
+const LUCIDE_VERSION = "1.81.0";
+const LUCIDE_CDN = "https://cdn.jsdelivr.net/npm";
+const ICON_NAME = /^[a-z0-9-]{1,64}$/;
+const ICON_MAX_BYTES = 64 * 1024;
+const squash = (s: string): string => s.toLowerCase().replace(/-/g, ""); // globe-2 and Globe2 both become globe2
+
+let lucideNames: Promise<Map<string, string>> | null = null;
+/** Every Lucide name and alias, squashed, to the icon file that draws it. Fetched once per server. */
+function lucideIndex(): Promise<Map<string, string>> {
+  lucideNames ??= (async () => {
+    const res = await fetch(`${LUCIDE_CDN}/lucide-react@${LUCIDE_VERSION}/dist/esm/lucide-react.mjs`, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`lucide-react: HTTP ${res.status}`);
+    const map = new Map<string, string>();
+    for (const m of (await res.text()).matchAll(/export \{([^}]*)\} from '\.\/icons\/([a-z0-9-]+)\.m?js'/g))
+      for (const n of m[1].matchAll(/default as (\w+)/g)) map.set(squash(n[1]), m[2]);
+    return map;
+  })().catch((e: Error) => { lucideNames = null; throw e; });
+  return lucideNames;
+}
+
+/** The SVG for a T3 project icon name, or null when Lucide has no such icon or the fetch failed. */
+async function fetchLucideSvg(name: string): Promise<Buffer | null> {
+  try {
+    const file = (await lucideIndex()).get(squash(name));
+    if (!file) return null;
+    const res = await fetch(`${LUCIDE_CDN}/lucide-static@${LUCIDE_VERSION}/icons/${file}.svg`, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.length <= ICON_MAX_BYTES && /^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/.test(buf.toString("utf8", 0, 2048)) ? buf : null;
+  } catch (e) {
+    console.error(`icon ${name}:`, (e as Error).message);
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------- server
 
 class Server {
@@ -1120,6 +1160,8 @@ class Server {
   sweeping = false;
   avatarFetches = new Map<string, Promise<Buffer | null>>(); // one GitHub fetch per login at a time
   avatarFailures = new Map<string, number>(); // login -> when its last fetch failed
+  iconFetches = new Map<string, Promise<Buffer | null>>();
+  iconFailures = new Map<string, number>(); // icon name -> when its last fetch failed
 
   constructor(user: User, notifyOn: boolean, sweepsOn: boolean) {
     this.user = user;
@@ -1158,6 +1200,31 @@ class Server {
       this.avatarFetches.set(login, pending);
     }
     return (await pending) ?? cached;
+  }
+
+  /** A Lucide icon for a T3 project, from users/<user>/icons/<name>.svg, fetched once and kept. Null: no icon. */
+  async icon(name: string): Promise<Buffer | null> {
+    if (!ICON_NAME.test(name)) return null;
+    const dir = path.join(this.user.dir, "icons");
+    const file = path.join(dir, `${name}.svg`);
+    try { return fs.readFileSync(file); } catch { /* not cached yet */ }
+    const failedAt = this.iconFailures.get(name);
+    if (failedAt && Date.now() - failedAt < AVATAR_RETRY_MS) return null;
+    let pending = this.iconFetches.get(name);
+    if (!pending) {
+      pending = fetchLucideSvg(name).then((buf) => {
+        if (buf) {
+          fs.mkdirSync(dir, { recursive: true });
+          const tmp = `${file}.${process.pid}.tmp`;
+          fs.writeFileSync(tmp, buf);
+          fs.renameSync(tmp, file);
+          this.iconFailures.delete(name);
+        } else this.iconFailures.set(name, Date.now());
+        return buf;
+      }).finally(() => this.iconFetches.delete(name));
+      this.iconFetches.set(name, pending);
+    }
+    return pending;
   }
 
   /** Refresh unless one is running; the page's button waits for the running one instead. */
@@ -1215,6 +1282,14 @@ class Server {
         if (!img) return send(404, { error: "no avatar" });
         res.writeHead(200, { "Content-Type": imageType(img)!, "Cache-Control": "private, max-age=86400" });
         return void res.end(img);
+      }
+      const iconMatch = /^\/icon\/([a-z0-9-]+)\.svg(?:\?.*)?$/.exec(url);
+      if (iconMatch) {
+        const svg = await this.icon(iconMatch[1]);
+        if (!svg) return send(404, { error: "no such icon" });
+        res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "private, max-age=86400",
+          "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'" });
+        return void res.end(svg);
       }
       return send(404, { error: "not found" });
     }

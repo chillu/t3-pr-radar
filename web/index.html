@@ -378,8 +378,16 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
     if (icon && icon.kind === "lucide" && /^[a-z0-9-]+$/.test(icon.name || "")) {
       b.style.setProperty("--c", "var(" + colorVar(icon.color || p.color) + ")");
       const i = el("i");
-      i.style.setProperty("--icon", "url(https://cdn.jsdelivr.net/npm/lucide-static@0.460.0/icons/" + icon.name + ".svg)");
+      const src = "/icon/" + icon.name + ".svg";
+      i.style.setProperty("--icon", "url(" + src + ")");
       b.append(i);
+      // A mask can't report a missing image, so probe it; on failure show T3's monogram instead.
+      const probe = new Image();
+      probe.onerror = () => {
+        b.style.setProperty("--c", "var(" + colorVar(p.color) + ")");
+        b.replaceChildren(p.monogram || "PR");
+      };
+      probe.src = src;
     } else {
       b.style.setProperty("--c", "var(" + colorVar(p.color) + ")");
       b.textContent = p.monogram || "PR";
