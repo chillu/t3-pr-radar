@@ -62,11 +62,16 @@ section { display: grid; gap: 10px; }
 .threads a.t3 { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 2px; }
 .threads a.t3:hover { text-decoration-color: currentColor; }
 .threads a.new-thread { color: var(--accent); }
-.acts { display: flex; gap: 6px; align-items: start; }
+.acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: start; justify-content: flex-end; }
 button { font: inherit; font-size: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 4px; padding: 3px 9px; cursor: pointer; white-space: nowrap; }
 button:hover { border-color: var(--muted); }
 button[disabled] { opacity: .5; cursor: default; }
 button.primary { border-color: var(--accent); color: var(--accent); }
+a.btn { display: inline-block; font-size: 12px; line-height: 1.5; border: 1px solid var(--line); border-radius: 4px; padding: 3px 9px; white-space: nowrap; text-decoration: none; color: var(--ink); background: var(--surface); }
+a.btn:hover { border-color: var(--muted); }
+a.t3btn { color: var(--muted); }
+a.t3btn.linked { color: var(--accent); border-color: var(--accent); }
+.pick-foot { display: flex; gap: 6px; margin-top: 4px; }
 .group-label { font-family: var(--f-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 10px 16px 0; }
 details.parked { font-size: 13px; color: var(--muted); }
 details.parked summary { cursor: pointer; padding: 4px 0; }
@@ -219,6 +224,17 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     const q = new URLSearchParams({ pr: item.url, prompt });
     return "t3code://new?" + q.toString();
   }
+  function t3Href(u) { return typeof u === "string" && u.startsWith("t3code://") ? u : null; }
+  // The one way into T3 for a PR: its newest linked thread, or a draft thread about it.
+  function t3Button(item) {
+    const open = (item.threads || []).find((t) => t3Href(t.openUrl));
+    const a = el("a", "btn t3btn" + (open ? " linked" : ""), open ? "Open in T3" : "Start in T3");
+    a.href = open ? open.openUrl : newThreadUrl(item);
+    a.title = open
+      ? "Open “" + (open.title || "the linked thread") + "” in T3 Code"
+      : "Start a thread about this PR in T3 Code. It opens as a draft; nothing runs until you press Send.";
+    return a;
+  }
   function roleChip(item) {
     if (item.section === "mine") return ["mine", "authored by you"];
     if (item.section === "review") {
@@ -318,25 +334,29 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
       box.append(el("div", "left", item.reasons.join(" · ")));
       main.append(box);
     }
-    const th = el("div", "threads");
-    th.append("T3: ");
-    (item.threads || []).forEach((t, i) => {
-      if (i) th.append(" · ");
-      if (typeof t.openUrl === "string" && t.openUrl.startsWith("t3code://")) {
-        const a = el("a", "t3", t.title || t.id);
-        a.href = t.openUrl;
-        a.title = "Open this thread in T3 Code";
-        th.append(a);
-      } else th.append(el("span", null, t.title || t.id));
-    });
-    if ((item.threads || []).length) th.append(" · ");
-    const nt = el("a", "t3 new-thread", "New T3 thread");
-    nt.href = newThreadUrl(item);
-    nt.title = "Opens a draft in T3 Code. Nothing runs until you press Send.";
-    th.append(nt);
-    main.append(th);
+    // Every linked thread, newest first; the row's T3 button opens the newest one.
+    if ((item.threads || []).length) {
+      const th = el("div", "threads");
+      th.append("T3: ");
+      item.threads.forEach((t, i) => {
+        if (i) th.append(" · ");
+        if (t3Href(t.openUrl)) {
+          const a = el("a", "t3", t.title || t.id);
+          a.href = t.openUrl;
+          a.title = "Open this thread in T3 Code";
+          th.append(a);
+        } else th.append(el("span", null, t.title || t.id));
+      });
+      th.append(" · ");
+      const nt = el("a", "t3 new-thread", "new thread");
+      nt.href = newThreadUrl(item);
+      nt.title = "Start a fresh thread about this PR. It opens as a draft; nothing runs until you press Send.";
+      th.append(nt);
+      main.append(th);
+    }
     r.append(main);
     const acts = el("div", "acts");
+    acts.append(t3Button(item));
     if (parked) {
       const b = el("button", null, "Bring back");
       b.onclick = () => triage(item, "clear");
@@ -484,6 +504,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
       c.append(head);
       c.append(link(it.title, it.url, "t"));
       if (p.why) c.append(el("div", "why", p.why));
+      const foot = el("div", "pick-foot");
+      foot.append(t3Button(it));
+      c.append(foot);
       pk.append(c);
     });
     fill("mine", board.mine);

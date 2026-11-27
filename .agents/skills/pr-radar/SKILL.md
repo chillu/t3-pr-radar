@@ -37,6 +37,7 @@ shell variables don't carry between calls. The `--user <login>` flag selects
    - Skip the thread you're running in.
    - Read only `pullRequests`, never `pullRequestCount`, since the two can disagree.
    - **Small pages** (`limit: 25`, the normal case): for each newer thread with `pullRequests` entries, run `node radar.ts link-thread --user <login> <Owner/repo#n> <threadId> --title "<title>" --link "<link>" --updated-at <updatedAt> --status <status>`. Finish with `node radar.ts thread-scan --user <login> --set <newest updatedAt seen>`.
+   - **Threads about other people's PRs.** T3 only links a PR to threads that created or pushed to it, so a peer review usually goes unlinked. After choosing picks in step 4, come back here for each pick that has no `threads`. Call `t3_thread_search` with the pick's PR URL, and link any match whose title, branch or messages show it works on that PR. Link it with `link-thread`, using the match's `updatedAt` and `status`. Leave alone threads that only mention the PR in passing.
    - **When a page is saved to a file** (first scan, or `limit: 100`): run `node radar.ts ingest-threads --user <login> <file> --floor <date 60 days ago> --skip <your thread id>`. Keep paging while it prints `keepPaging: true`, and add `--commit` on the last file.
 
 3. **Judge the user's PRs.** Run `node radar.ts todo --user <login>`. It lists the user's PRs whose PR or linked thread moved since their note was written, with their recent events. Work through every entry and write a note for each:
