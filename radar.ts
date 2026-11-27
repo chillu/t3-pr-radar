@@ -537,6 +537,110 @@ async function notify(title: string, text: string): Promise<void> {
   await run("osascript", ["-e", `display notification ${JSON.stringify(text)} with title ${JSON.stringify(title)} sound name "Glass"`]);
 }
 
+// ---------------------------------------------------------------- T3 projects
+
+// The page badges each PR with its T3 project's icon. T3's own ProjectMonogram rule, decompiled
+// from the app, so the badges match T3's sidebar: initials from the title, a colour from its hash.
+const MONOGRAM_PALETTE = ["gray", "red", "orange", "amber", "yellow", "lime", "green", "emerald", "teal", "cyan",
+  "sky", "blue", "indigo", "violet", "purple", "fuchsia", "pink", "rose"];
+const normName = (s: string): string => s.normalize("NFKC").trim();
+
+function projectMonogram(name: string): string {
+  const words = normName(name).match(/[\p{L}\p{N}]+/gu) ?? [];
+  const first = words[0];
+  if (!first) return "PR";
+  const chars = Array.from(first);
+  const a = chars[0] ?? "P";
+  const b = chars.slice(1).find((c) => /\p{N}/u.test(c)) ??
+    (words.length > 1 ? Array.from(words.at(-1) ?? "")[0] : chars.at(-1)) ?? a;
+  return Array.from((a + b).toUpperCase()).slice(0, 2).join("");
+}
+
+function projectColor(name: string): string {
+  const s = normName(name).toLocaleLowerCase("en-US") || "project";
+  let n = 0;
+  for (const c of s) n = (n * 31 + (c.codePointAt(0) ?? 0)) % MONOGRAM_PALETTE.length;
+  return MONOGRAM_PALETTE[n] ?? "blue";
+}
+
+/** What the badges need from t3_project_list's projects. */
+function slimProjects(list: Obj[]): Obj[] {
+  return list.filter((p) => !p.deletedAt && !p.archivedAt).map((p) => {
+    const r = p.repositoryIdentity ?? null;
+    return { title: p.title ?? "", owner: r?.owner ?? null, name: r?.name ?? null,
+      atRoot: !!r && p.workspaceRoot === r.rootPath, icon: p.projectIcon ?? null, createdAt: p.createdAt ?? "" };
+  });
+}
+
+const storeProjects = (db: DatabaseSync, list: Obj[]): void => metaSet(db, "t3Projects", { at: iso(now()), projects: slimProjects(list) });
+
+/** The T3 Connect MCP URL that sweeps use, from the file `t3-mcp` writes. */
+function t3McpUrl(user: User): string | null {
+  const rel: string | null = sweepConfig(user.config).mcpConfig;
+  const file = rel ? path.join(ROOT, rel) : path.join(user.dir, "t3-mcp.json");
+  if (!fs.existsSync(file)) return null;
+  return loadJson<Obj>(file, {}).mcpServers?.t3?.url ?? null;
+}
+
+/** One tool call over MCP's streamable HTTP transport: initialize, then tools/call. */
+async function mcpCall(url: string, tool: string, args: Obj): Promise<Obj> {
+  let session: string | null = null;
+  let id = 0;
+  const post = async (method: string, params: Obj, notification = false): Promise<Obj | null> => {
+    const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
+    if (session) headers["Mcp-Session-Id"] = session;
+    if (method !== "initialize") headers["MCP-Protocol-Version"] = "2025-06-18";
+    const msg = notification ? { jsonrpc: "2.0", method, params } : { jsonrpc: "2.0", id: ++id, method, params };
+    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(msg), signal: AbortSignal.timeout(15_000) });
+    session = res.headers.get("mcp-session-id") ?? session;
+    if (!res.ok) throw new Error(`T3 MCP ${method}: HTTP ${res.status}`);
+    const text = await res.text();
+    if (notification) return null;
+    const replies: Obj[] = (res.headers.get("content-type") ?? "").includes("text/event-stream")
+      ? text.split("\n").filter((l) => l.startsWith("data:")).map((l) => JSON.parse(l.slice(5)))
+      : [JSON.parse(text)];
+    const reply = replies.find((r) => r.id === id);
+    if (!reply) throw new Error(`T3 MCP ${method}: no reply`);
+    if (reply.error) throw new Error(`T3 MCP ${method}: ${reply.error.message}`);
+    return reply.result;
+  };
+  await post("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "pr-radar", version: "1" } });
+  await post("notifications/initialized", {}, true);
+  const result = (await post("tools/call", { name: tool, arguments: args }))!;
+  const text: string | undefined = result.content?.find((c: Obj) => c.type === "text")?.text;
+  if (result.isError) throw new Error(`T3 MCP ${tool}: ${text ?? "failed"}`);
+  return result.structuredContent ?? JSON.parse(text ?? "{}");
+}
+
+/** T3's projects through T3 Connect, or null when there's no MCP URL. */
+async function fetchT3Projects(user: User): Promise<Obj[] | null> {
+  const url = t3McpUrl(user);
+  if (!url) return null;
+  const out: Obj[] = [];
+  let cursor: number | null = null;
+  for (let page = 0; page < 10; page++) {
+    const r: Obj = await mcpCall(url, "t3_project_list", { limit: 200, ...(cursor === null ? {} : { cursor }) });
+    out.push(...(r.projects ?? []));
+    cursor = r.nextCursor ?? null;
+    if (cursor === null) break;
+  }
+  return out;
+}
+
+/**
+ * A repo's T3 badge: its project's icon if set, else T3's monogram for the project title, or for the
+ * repo name when no T3 project has that repo. Several projects can share a repo (a subfolder opened
+ * as its own project); the one opened at the repo root wins, then the oldest.
+ */
+function repoBadge(repo: string, projects: Obj[]): Obj {
+  const [owner, name] = repo.toLowerCase().split("/");
+  const p = projects
+    .filter((x) => x.owner?.toLowerCase() === owner && x.name?.toLowerCase() === name)
+    .sort((a, b) => Number(b.atRoot) - Number(a.atRoot) || String(a.createdAt).localeCompare(String(b.createdAt)))[0];
+  const label: string = p?.title || repo.split("/")[1] || repo;
+  return { project: p?.title ?? null, monogram: projectMonogram(label), color: projectColor(label), icon: p?.icon ?? null };
+}
+
 // ---------------------------------------------------------------- refresh
 
 /**
@@ -555,6 +659,8 @@ async function refresh(user: User, sendNotifications = false, forceFull = false)
     }
     const lastFull = metaGet<string>(db, "lastFullRefresh");
     const full = forceFull || !lastFull || now().getTime() - parse(lastFull)!.getTime() > FULL_EVERY_HOURS * HOUR;
+    // T3's project list for the badges, alongside GitHub; a failure keeps the cached list
+    const t3Projects = fetchT3Projects(user).catch((e: Error) => { console.error("T3 projects:", e.message); return null; });
     const { nodes: light, rate } = await searchAll(`org:${org} is:pr is:open archived:false`, LIGHT_FIELDS, 100);
     const t = iso(now());
     const ignore = new Set<string>(profile.ignoreRepos ?? []);
@@ -584,6 +690,8 @@ async function refresh(user: User, sendNotifications = false, forceFull = false)
     for (const [key, row] of stored) {
       if (!fps.has(key) && "mine" in JSON.parse(row.item)) closed.set(key, await closedState(key));
     }
+    const projects = await t3Projects;
+    if (projects) storeProjects(db, projects);
     const firstRefresh = !metaGet(db, "lastRefresh");
     const newEvents: [string, string, string, string, Obj][] = [];
     transaction(db, () => {
@@ -726,6 +834,9 @@ function buildBoard(user: User): Obj {
       .sort((a, b) => b.score - a.score).slice(0, profile.maxTeam ?? 8);
     const picks: Obj[] = metaGet<Obj[]>(db, "picks", []) ?? [];
     for (const p of picks) p.id = docId(p.key);
+    const t3Projects: Obj[] = metaGet<Obj>(db, "t3Projects", null)?.projects ?? [];
+    const badges: Obj = {};
+    for (const i of [...mine, ...review, ...team]) badges[i.repo] ??= repoBadge(i.repo, t3Projects);
     return {
       login: profile.login, org: profile.org,
       refreshedAt: metaGet(db, "lastRefresh"), triagedAt: metaGet(db, "triagedAt"),
@@ -736,6 +847,7 @@ function buildBoard(user: User): Obj {
       botPRsByRepo: metaGet(db, "botPRsByRepo", {}),
       events, lastViewed: lastSeen,
       sweeps: all(db, "select * from sweeps order by id desc limit 8").map((r) => ({ ...r })),
+      projects: badges, projectsAt: metaGet<Obj>(db, "t3Projects", null)?.at ?? null,
       mine, review, team,
     };
   });
@@ -1334,6 +1446,17 @@ const COMMANDS: Record<string, Command> = {
       const bar = since > floor ? since : floor;
       console.log(dump({ linked, oldestThreadInPages: oldest, nextCursor,
         keepPaging: !!nextCursor && ((oldest ?? "") as string) > bar, lastThreadScan: metaGet(db, "lastThreadScan") }));
+    }),
+  },
+  "t3-projects": {
+    help: "cache T3's project list (for the badges) from saved t3_project_list results",
+    user: true,
+    positionals: ["files..."],
+    run: (v, files) => withDb(userOf(v), (db) => {
+      const list = files.flatMap((f) => loadJson<Obj>(f, {}).projects ?? []);
+      if (!list.length) die("no projects in those files; save t3_project_list's JSON output and pass its path");
+      storeProjects(db, list);
+      console.log(dump({ projects: list.length }));
     }),
   },
   "thread-scan": {

@@ -4,601 +4,528 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PR Radar</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Sans:wght@500;600;700&display=swap">
 <style>
-/* Layout: one reading column; status bar, "since you last looked", next up, then three queues as dense rows. */
+/* Layout B1: a sidebar of groups, one table per group. Look: T3 Code's default theme. */
 :root {
-  --bg: #f4f5f7; --surface: #ffffff; --ink: #1c2230; --muted: #5d6676; --line: #dfe2e8;
-  --accent: #b4461b; --accent-soft: #fbe9e1; --ok: #217a4b; --warn: #9a6200; --bad: #b3261e; --chip: #eceef2;
-  --f-display: "Instrument Sans", "IBM Plex Sans", system-ui, sans-serif;
-  --f-body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  color-scheme: light;
+  --bg: #000; --card: #111; --border: rgba(255,255,255,.08); --divider: rgba(255,255,255,.06);
+  --hover: #191a1d; --pressed: #232428; --text: #f1f3f7; --muted: #a3a3a3; --dim: #6e6e73; --faint: #5c5c62;
+  --red: #f2555a; --amber: #e3b341; --t3: #d97757; --dash: #3a3a3f;
+  --f-ui: -apple-system, BlinkMacSystemFont, "Inter Variable", "Segoe UI", system-ui, sans-serif;
+  --f-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  /* Tailwind 400 shades for project badges in dark mode */
+  --gray: #9ca3af; --red-b: #f87171; --orange: #fb923c; --amber-b: #fbbf24; --yellow: #facc15; --lime: #a3e635;
+  --green: #4ade80; --emerald: #34d399; --teal: #2dd4bf; --cyan: #22d3ee; --sky: #38bdf8; --blue: #60a5fa;
+  --indigo: #818cf8; --violet: #a78bfa; --purple: #c084fc; --fuchsia: #e879f9; --pink: #f472b6; --rose: #fb7185;
+  color-scheme: dark;
 }
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
   :root {
-    --bg: #12151b; --surface: #1a1e26; --ink: #e6e8ee; --muted: #9aa2b1; --line: #2b313c;
-    --accent: #f08a5d; --accent-soft: #3a2219; --ok: #5cc48d; --warn: #e0a83a; --bad: #f27a72; --chip: #252a34;
-    color-scheme: dark;
+    --bg: #fff; --card: #f7f7f8; --border: rgba(0,0,0,.08); --divider: rgba(0,0,0,.06);
+    --hover: #eeeef0; --pressed: #e4e4e7; --text: #18181b; --muted: #5f5f66; --dim: #8e8e93; --faint: #a1a1a6;
+    --red: #d93036; --amber: #a86b00; --t3: #c96442; --dash: #c7c7cc;
+    /* Tailwind 600 shades in light mode */
+    --gray: #4b5563; --red-b: #dc2626; --orange: #ea580c; --amber-b: #d97706; --yellow: #ca8a04; --lime: #65a30d;
+    --green: #16a34a; --emerald: #059669; --teal: #0d9488; --cyan: #0891b2; --sky: #0284c7; --blue: #2563eb;
+    --indigo: #4f46e5; --violet: #7c3aed; --purple: #9333ea; --fuchsia: #c026d3; --pink: #db2777; --rose: #e11d48;
+    color-scheme: light;
   }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.5;
-  padding: 28px 16px 64px; }
-.wrap { max-width: 920px; margin: 0 auto; display: grid; gap: 32px; }
-a { color: inherit; }
-a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-header { display: grid; gap: 8px; }
-.bar { font-family: var(--f-mono); font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-.bar .err { color: var(--bad); }
-h1 { font-family: var(--f-display); font-size: 30px; line-height: 1.15; margin: 0; letter-spacing: -.01em; text-wrap: balance; }
-.headline { margin: 0; font-size: 16px; max-width: 66ch; }
-h2 { font-family: var(--f-display); font-size: 18px; margin: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-h2 .count { font-family: var(--f-mono); font-size: 12px; color: var(--muted); font-weight: 400; }
-.sub { color: var(--muted); margin: 2px 0 0; font-size: 13px; }
-.picks { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
-.pick { background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--accent); border-radius: 6px; padding: 14px 16px; display: grid; gap: 6px; align-content: start; min-width: 0; }
-.pick .why { font-size: 13px; color: var(--muted); }
-.pick .t { font-weight: 600; text-decoration: none; }
-.pick .t:hover { text-decoration: underline; }
-section { display: grid; gap: 10px; }
-.list { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
-.row { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; padding: 12px 16px; border-top: 1px solid var(--line); }
-.row:first-child { border-top: 0; }
-.row .main { min-width: 0; display: grid; gap: 4px; }
-.ref { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
-.title { font-weight: 500; text-decoration: none; overflow-wrap: anywhere; }
-.title:hover { text-decoration: underline; }
-.meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.chip { font-family: var(--f-mono); font-size: 11px; padding: 1px 7px; border-radius: 3px; background: var(--chip); color: var(--muted); white-space: nowrap; }
-.chip.act { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
-.chip.bad { color: var(--bad); } .chip.ok { color: var(--ok); } .chip.warn { color: var(--warn); }
-.chip.new { background: var(--ink); color: var(--bg); }
-.note { font-size: 13px; display: grid; gap: 2px; max-width: 70ch; }
-.note .next { font-weight: 500; } .note .q { color: var(--accent); } .note .left { color: var(--muted); }
-.threads { font-size: 12px; color: var(--muted); }
-.threads span, .threads a.t3 { font-family: var(--f-mono); }
-.threads a.t3 { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 2px; }
-.threads a.t3:hover { text-decoration-color: currentColor; }
-.threads a.new-thread { color: var(--accent); }
-.acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: start; justify-content: flex-end; }
-button { font: inherit; font-size: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 4px; padding: 3px 9px; cursor: pointer; white-space: nowrap; }
-button:hover { border-color: var(--muted); }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--f-ui); font-size: 14px; line-height: 1.5;
+  padding: 20px 24px 48px; }
+.wrap { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+a { color: var(--text); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--t3); outline-offset: 2px; }
+button { font: inherit; color: inherit; cursor: pointer; }
 button[disabled] { opacity: .5; cursor: default; }
-button.primary { border-color: var(--accent); color: var(--accent); }
-.av { width: 16px; height: 16px; border-radius: 50%; background: var(--chip); flex: none; object-fit: cover; }
-.av.sm { width: 14px; height: 14px; }
-.who { display: inline-flex; align-items: center; gap: 5px; vertical-align: bottom; }
-.ref.inline { display: inline; }
-.chip.waiting { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; white-space: normal; }
-.chip.waiting .who { gap: 3px; }
-a.btn { display: inline-block; font-size: 12px; line-height: 1.5; border: 1px solid var(--line); border-radius: 4px; padding: 3px 9px; white-space: nowrap; text-decoration: none; color: var(--ink); background: var(--surface); }
-a.btn:hover { border-color: var(--muted); }
-a.t3btn { color: var(--muted); }
-a.t3btn.linked { color: var(--accent); border-color: var(--accent); }
-.pick-foot { display: flex; gap: 6px; margin-top: 4px; }
-.group-label { font-family: var(--f-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 10px 16px 0; }
-details.parked { font-size: 13px; color: var(--muted); }
-details.parked summary { cursor: pointer; padding: 4px 0; }
-.empty { padding: 20px 16px; color: var(--muted); }
-.feed { display: grid; gap: 0; }
-.ev { display: grid; grid-template-columns: 64px 1fr; gap: 12px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 13px; }
-.ev:first-child { border-top: 0; }
-.ev time { font-family: var(--f-mono); font-size: 11px; color: var(--muted); padding-top: 2px; }
-.ev.fresh { background: var(--accent-soft); }
-.ev .what { font-weight: 500; }
-.ev .on { color: var(--muted); overflow-wrap: anywhere; }
-.ev .on a { text-decoration: none; } .ev .on a:hover { text-decoration: underline; }
-.filters { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; position: sticky; top: 0; z-index: 5; }
-.filters label { font-family: var(--f-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.filters select { font: inherit; font-size: 13px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); max-width: 100%; }
-.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
-.seg button { border: 0; border-radius: 0; border-left: 1px solid var(--line); padding: 4px 10px; }
-.seg button:first-child { border-left: 0; }
-.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
-.filters .reset { margin-left: auto; }
-.filters label.check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; text-transform: none; letter-spacing: 0; font-family: var(--f-body); font-size: 13px; color: var(--ink); }
-.filters label.check input { margin: 0; accent-color: var(--accent); }
-.role { font-family: var(--f-mono); font-size: 11px; padding: 1px 7px; border-radius: 3px; white-space: nowrap; border: 1px solid currentColor; }
-.role.mine { color: var(--accent); }
-.role.reviewing { color: var(--ok); }
-.role.other { color: var(--muted); }
-.sw { padding: 10px 16px; border-top: 1px solid var(--line); display: grid; gap: 4px; font-size: 13px; }
-.sw:first-child { border-top: 0; }
-.sw .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
-.sw .head time { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
-.sw .st { font-family: var(--f-mono); font-size: 11px; }
-.sw .st.ok { color: var(--ok); } .sw .st.error { color: var(--bad); } .sw .st.running { color: var(--warn); }
-.sw details summary { cursor: pointer; color: var(--muted); }
-.sw pre { white-space: pre-wrap; font-family: var(--f-body); margin: 6px 0 0; max-width: 75ch; }
-.sw .log { font-family: var(--f-mono); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
-footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
-@media (max-width: 560px) { .row { grid-template-columns: 1fr; } h1 { font-size: 24px; } }
-@media (prefers-reduced-motion: no-preference) { .row { transition: opacity .2s; } }
+.mono { font-family: var(--f-mono); }
+
+header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+#status { font-size: 13px; color: var(--muted); }
+#status .bad, #err { color: var(--red); }
+#err { font-size: 13px; }
+.btn { font-size: 13px; border: 1px solid var(--border); background: var(--card); color: var(--text); border-radius: 8px; padding: 5px 12px; }
+.btn:hover:not([disabled]) { background: var(--hover); }
+.hbtns { display: flex; gap: 8px; }
+
+.cols { display: flex; flex-wrap: wrap; gap: 24px; align-items: start; }
+nav { flex: 1 1 200px; max-width: 232px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 16px; }
+.seg { display: flex; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 3px; margin-bottom: 14px; }
+.seg button { flex: 1; font-size: 13px; border: 0; border-radius: 6px; padding: 5px 8px; background: transparent; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--pressed); color: var(--text); }
+.nav-h { font-size: 12px; color: var(--faint); padding: 14px 10px 4px; border: 0; background: none; text-align: left; }
+.nav-h:first-of-type { padding-top: 0; }
+.nav-i { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px;
+  border: 0; background: transparent; color: var(--muted); text-align: left; font-size: 14px; }
+.nav-i.move { color: var(--text); }
+.nav-i:hover { background: var(--hover); }
+.nav-i[aria-current="true"] { background: var(--hover); color: var(--text); }
+.nav-i .n { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+.nav-i .n.red { color: var(--red); }
+.nav-i .lbl { display: inline-flex; gap: 6px; align-items: center; }
+.nav-sep { height: 1px; background: var(--divider); margin: 10px 0; }
+
+main { flex: 999 1 600px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+section { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 16px; }
+section.parked { opacity: .85; }
+h2 { margin: 0; font-size: 14px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+h2.red { color: var(--red); }
+h2 .hint { font-weight: 400; font-size: 13px; color: var(--muted); }
+.table { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.empty { padding: 14px; color: var(--muted); font-size: 13px; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 56px auto; gap: 14px; align-items: center; padding: 10px 14px;
+  border-top: 1px solid var(--divider); }
+.row:first-child { border-top: 0; }
+.row:hover { background: var(--hover); }
+.l1, .l2 { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.l2 { gap: 6px; font-size: 13px; margin-top: 2px; }
+.badge { flex: none; width: 18px; height: 18px; border-radius: 25%; display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--f-mono); font-size: 9px; font-weight: 700; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+.badge i { width: 12px; height: 12px; background: var(--c); -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat; }
+.title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.num { font-family: var(--f-mono); font-size: 12px; color: var(--faint); white-space: nowrap; }
+.draft { flex: none; font-size: 11px; color: var(--muted); border: 1px dashed var(--dash); border-radius: 4px; padding: 0 5px; }
+.av { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--border); object-fit: cover; }
+.who { flex: none; color: var(--muted); }
+.dot { color: var(--faint); }
+.why { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.why.red { color: var(--red); }
+.age { display: flex; gap: 4px; align-items: center; justify-content: flex-end; font-family: var(--f-mono); font-size: 12px; color: var(--dim); }
+.age.old { color: var(--amber); }
+.acts { display: flex; gap: 4px; align-items: center; }
+.t3btn { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; border: 1px solid var(--border); border-radius: 7px;
+  padding: 4px 9px; white-space: nowrap; }
+.t3btn:hover { text-decoration: none; background: var(--pressed); }
+.t3btn svg { stroke: var(--faint); }
+.t3btn.linked svg { stroke: var(--t3); }
+.ibtn { display: inline-flex; border: 0; background: transparent; color: var(--muted); padding: 5px; border-radius: 6px; }
+.ibtn:hover { background: var(--pressed); color: var(--text); }
+.pnote { font-size: 12px; color: var(--muted); white-space: nowrap; margin-right: 6px; }
+.sbtn { font-size: 12px; border: 1px solid var(--border); background: transparent; border-radius: 7px; padding: 4px 9px; white-space: nowrap; }
+.sbtn:hover { background: var(--pressed); }
+#snooze-menu { position: absolute; z-index: 10; display: flex; flex-direction: column; min-width: 140px; padding: 4px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+#snooze-menu[hidden] { display: none; }
+#snooze-menu button { border: 0; background: transparent; text-align: left; font-size: 13px; padding: 5px 10px; border-radius: 6px; }
+#snooze-menu button:hover { background: var(--hover); }
+footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 2px; }
+
+@media (max-width: 720px) {
+  body { padding: 16px 16px 40px; }
+  nav { max-width: none; position: static; }
+  .row { grid-template-columns: minmax(0, 1fr) auto; }
+  .row .acts { grid-column: 1 / -1; justify-content: flex-start; }
+}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <div class="bar">
-      <span id="who"></span>
-      <span id="fresh">Loading…</span>
-      <button id="refresh" class="primary" type="button">Refresh</button>
-      <button id="sweep" type="button" title="Ask Claude to re-read what moved and redo the notes and picks">Sweep now</button>
-      <span id="err" class="err"></span>
+    <div id="status">Loading…</div>
+    <div class="hbtns">
+      <span id="err" role="alert"></span>
+      <button id="refresh" class="btn" type="button" title="Fetch what changed on GitHub now">Refresh</button>
+      <button id="sweep" class="btn" type="button" title="Ask Claude to re-read what moved and redo the notes">Sweep now</button>
     </div>
-    <h1>What needs you next</h1>
-    <p class="headline" id="headline"></p>
   </header>
 
-  <div class="filters" role="group" aria-label="Filters">
-    <label for="repo-filter">Repo</label>
-    <select id="repo-filter"><option value="">All repositories</option></select>
-    <label>Role</label>
-    <div class="seg" id="role-filter">
-      <button type="button" data-role="" aria-pressed="true">All</button>
-      <button type="button" data-role="mine" aria-pressed="false">Authored by me</button>
-      <button type="button" data-role="review" aria-pressed="false">Reviewing</button>
-      <button type="button" data-role="team" aria-pressed="false">Team</button>
-    </div>
-    <label>Work</label>
-    <div class="seg" id="effort-filter">
-      <button type="button" data-effort="" aria-pressed="true">All</button>
-      <button type="button" data-effort="quick" aria-pressed="false">Quick wins</button>
-      <button type="button" data-effort="deep" aria-pressed="false">Deep work</button>
-    </div>
-    <label class="check"><input type="checkbox" id="drafts-filter" checked> My drafts</label>
-    <button type="button" class="reset" id="reset-filters" hidden>Clear filters</button>
+  <div class="cols">
+    <nav aria-label="Groups" id="nav">
+      <div class="seg" role="group" aria-label="Order within groups">
+        <button type="button" data-order="quick">Quick first</button>
+        <button type="button" data-order="deep">Deep first</button>
+      </div>
+    </nav>
+    <main id="main" aria-live="polite"></main>
   </div>
 
-  <section id="feed-sec" hidden>
-    <h2>Since you last looked <span class="count" id="feed-count"></span></h2>
-    <div class="list feed" id="feed"></div>
-  </section>
-
-  <section id="picks-sec" hidden>
-    <h2>Next up <span class="count" id="mode"></span></h2>
-    <div class="picks" id="picks"></div>
-  </section>
-
-  <section id="mine-sec">
-    <div><h2>Your pull requests <span class="count" id="mine-count"></span></h2>
-    <p class="sub">What's left on each, from GitHub and the T3 threads working on it.</p></div>
-    <div class="list" id="mine"></div>
-    <details class="parked" id="mine-parked" hidden><summary></summary><div class="list"></div></details>
-  </section>
-
-  <section id="review-sec">
-    <div><h2>Reviewing <span class="count" id="review-count"></span></h2>
-    <p class="sub">Other people's PRs: ones you've reviewed or been asked to, then the ones you're best placed for, from your teams and the areas you know.</p></div>
-    <div class="list" id="review"></div>
-    <details class="parked" id="review-parked" hidden><summary></summary><div class="list"></div></details>
-  </section>
-
-  <section id="team-sec">
-    <div><h2>Stalled near the finish <span class="count" id="team-count"></span></h2>
-    <p class="sub">Other people's PRs that are green and close, but nobody has moved in a while.</p></div>
-    <div class="list" id="team"></div>
-    <details class="parked" id="team-parked" hidden><summary></summary><div class="list"></div></details>
-  </section>
-
-  <section id="sweeps-sec" hidden>
-    <div><h2>Sweeps <span class="count" id="sweeps-count"></span></h2>
-    <p class="sub">Claude runs a sweep when something moved: one of your PRs or its thread, a new review request, or a new block of your day. Full transcripts are kept for a week.</p></div>
-    <div class="list" id="sweeps"></div>
-  </section>
-
   <footer>
-    <div id="bots"></div>
-    <div>GitHub data refreshes in the background every few minutes. Notes and picks come from Claude's sweeps, which run on a schedule or when you ask in the pr-radar T3 thread. Done hides a PR until it changes again; Snooze hides it until the date passes.</div>
+    <span>Open in T3 opens the PR's thread, or starts a draft thread when there isn't one. The asterisk is lit when a thread exists.</span>
+    <span>Settle hides a PR until it changes again: a push, a review or a comment. Settled and snoozed PRs stay one click away, in the sidebar.</span>
   </footer>
+</div>
+<div id="snooze-menu" role="menu" hidden>
+  <button type="button" role="menuitem" data-days="1">Until tomorrow</button>
+  <button type="button" role="menuitem" data-days="3">For 3 days</button>
+  <button type="button" role="menuitem" data-days="7">For a week</button>
 </div>
 
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
-  let board = null, viewedSent = false;
-  // Team and review queues never contain drafts (the scorer leaves out PRs that aren't ready for review),
-  // so "My drafts" only affects your own list.
-  const DEFAULT_FILTERS = { repo: "", role: "", effort: "", drafts: true };
-  let filters = Object.assign({}, DEFAULT_FILTERS);
-  try { filters = Object.assign(filters, JSON.parse(localStorage.getItem("pr-radar-filters") || "{}")); } catch (e) {}
-  function saveFilters() { try { localStorage.setItem("pr-radar-filters", JSON.stringify(filters)); } catch (e) {} }
-  function filtersActive() { return !!(filters.repo || filters.role || filters.effort || !filters.drafts); }
-  function roleOf(item) { return item.section; }
-  function passes(item) {
-    return (!filters.repo || item.repo === filters.repo) &&
-      (!filters.role || roleOf(item) === filters.role) &&
-      (!filters.effort || item.effort === filters.effort) &&
-      (filters.drafts || !item.draft);
+  const ICON = {
+    clock: '<circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>',
+    check: '<path d="m5 12 5 5 9-10"></path>',
+    star: '<path d="M12 3v18"></path><path d="M3 12h18"></path><path d="m5.6 5.6 12.8 12.8"></path><path d="m18.4 5.6-12.8 12.8"></path>',
+  };
+  function svg(name, size, width) {
+    const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    s.setAttribute("width", size); s.setAttribute("height", size); s.setAttribute("viewBox", "0 0 24 24");
+    s.setAttribute("fill", "none"); s.setAttribute("stroke", "currentColor"); s.setAttribute("stroke-width", width || 2);
+    s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round"); s.setAttribute("aria-hidden", "true");
+    s.innerHTML = ICON[name];
+    return s;
   }
-  // t3code://new?pr=... opens a draft thread about the PR in T3 Code (nothing runs until Send).
-  function newThreadUrl(item) {
-    const n = item.note || {};
-    let prompt;
-    if (item.section === "mine") {
-      prompt = "Take over " + item.url + "." + (n.next ? " Next step from the PR radar: " + n.next : "") +
-        (n.question ? " Open question: " + n.question : "");
-    } else if (item.section === "review") {
-      prompt = "I'm peer reviewing " + item.url + " by " + item.author + "." +
-        (item.pushedSinceMyReview ? " There are new commits since my last review." : "");
-    } else {
-      prompt = "Look at " + item.url + " by " + item.author + ". The PR radar says: " + item.stall +
-        " for " + Math.round(item.days || 0) + " days. Work out what it needs to get over the line, and who should do it.";
-    }
-    const q = new URLSearchParams({ pr: item.url, prompt });
-    return "t3code://new?" + q.toString();
-  }
-  // A 16px round GitHub avatar, served and cached by the radar server. Hidden if there isn't one.
-  function avatar(login, cls) {
-    const img = el("img", "av" + (cls ? " " + cls : ""));
-    img.src = "/avatar/" + encodeURIComponent(login);
-    img.alt = "";
-    img.loading = "lazy";
-    img.width = img.height = cls === "sm" ? 14 : 16;
-    img.title = login;
-    img.onerror = () => { img.hidden = true; };
-    return img;
-  }
-  // "repo #123", plus the author with their avatar on other people's PRs.
-  function refLine(item, cls) {
-    const ref = el("div", cls || "ref");
-    ref.append(shortRepo(item.repo) + " #" + item.number);
-    if (item.section !== "mine" && item.author) {
-      ref.append(" · ");
-      const who = el("span", "who");
-      who.append(avatar(item.author), item.author);
-      ref.append(who);
-    }
-    return ref;
-  }
-  // Who's holding one of your PRs: pending reviewers with their avatars, teams by name.
-  function waitingOn(requested) {
-    const chip = el("span", "chip waiting");
-    chip.append("waiting on");
-    requested.forEach((r, i) => {
-      const p = el("span", "who");
-      if (!r.startsWith("@")) p.append(avatar(r, "sm"));
-      p.append(r + (i < requested.length - 1 ? "," : ""));
-      chip.append(p);
-    });
-    return chip;
-  }
-  function t3Href(u) { return typeof u === "string" && u.startsWith("t3code://") ? u : null; }
-  // The one way into T3 for a PR: its newest linked thread, or a draft thread about it.
-  function t3Button(item) {
-    const open = (item.threads || []).find((t) => t3Href(t.openUrl));
-    const a = el("a", "btn t3btn" + (open ? " linked" : ""), open ? "Open in T3" : "Start in T3");
-    a.href = open ? open.openUrl : newThreadUrl(item);
-    a.title = open
-      ? "Open “" + (open.title || "the linked thread") + "” in T3 Code"
-      : "Start a thread about this PR in T3 Code. It opens as a draft; nothing runs until you press Send.";
-    return a;
-  }
-  function roleChip(item) {
-    if (item.section === "mine") return ["mine", "authored by you"];
-    if (item.section === "review") {
-      const p = item.participation;
-      if (p === "requested") return ["reviewing", "review requested from you"];
-      if (p === "reviewed") return ["reviewing", "you've reviewed"];
-      if (p === "team") return ["reviewing", "requested from your team"];
-      return ["other", "suggested review"];
-    }
-    return ["other", "team PR"];
-  }
-
   function el(tag, cls, text) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
     if (text != null) e.textContent = text;
     return e;
   }
-  function link(text, url, cls) {
-    const a = el("a", cls, text);
-    if (typeof url === "string" && url.startsWith("https://")) { a.href = url; a.target = "_blank"; a.rel = "noopener"; }
-    return a;
+
+  // ---- the groups, in sidebar order. "move" groups are the default view; the others filter.
+  const GROUPS = [
+    { id: "fix", label: "Fix", hint: "your PRs that need you", nav: "move", red: true },
+    { id: "review", label: "Review", hint: "review requested", nav: "move" },
+    { id: "chase", label: "Chase", hint: "a message from you moves these", nav: "move" },
+    { id: "decide", label: "Decide: finish or close", hint: "stale drafts and abandoned PRs", nav: "later" },
+    { id: "drafts", label: "Drafts in progress", hint: "yours, still being written", nav: "later" },
+    { id: "waiting", label: "Your PRs, with reviewers", hint: "waiting on review", nav: "away" },
+    { id: "authors", label: "Reviews, with authors", hint: "conflict or changes requested", nav: "away" },
+    { id: "team", label: "Team PRs, no reviewer", hint: "nobody has moved these in a while", nav: "away" },
+  ];
+  const PARKED = { id: "parked", label: "Settled and snoozed", hint: "back when the PR changes or the snooze ends" };
+  const NAV_HEADS = { move: "Your move", later: "Later", away: "Not on you" };
+  const FIX_ACTIONS = new Set(["Answer review comments", "Resolve the merge conflict", "Fix failing CI", "Approved: merge it"]);
+  const BROKEN = new Set(["Answer review comments", "Resolve the merge conflict", "Fix failing CI"]);
+
+  function groupOf(i) {
+    if (i.section === "mine") {
+      if (i.action === "Abandoned? Close or revive" || i.action === "Stale draft: finish or close") return "decide";
+      if (i.draft) return "drafts";
+      if (FIX_ACTIONS.has(i.action)) return "fix";
+      if (i.action === "Ask someone to review" || i.action === "Nudge your reviewer") return "chase";
+      return "waiting";
+    }
+    if (i.section === "review") {
+      if (i.mergeable === "CONFLICTING") return "authors";
+      if (i.decision === "CHANGES_REQUESTED" && !i.pushedSinceMyReview) return "authors";
+      return "review";
+    }
+    return i.stall === "Approved and green, not merged" ? "chase" : "team";
   }
-  function ago(ts) {
-    if (!ts) return "never";
+
+  // ---- state
+  let board = null;
+  const store = {
+    get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private window */ } },
+  };
+  let order = store.get("pr-radar-order", "quick");
+  let view = store.get("pr-radar-view", "move"); // "move" or one group id
+  if (view !== "move" && view !== "parked" && !GROUPS.some((g) => g.id === view)) view = "move";
+
+  // ---- text helpers
+  function sentence(s) { s = String(s || "").trim(); return s ? s[0].toUpperCase() + s.slice(1) : ""; }
+  function join(parts) {
+    return parts.filter(Boolean).map((p) => { p = sentence(p); return /[.!?…]$/.test(p) ? p : p + "."; }).join(" ").replace(/\.$/, "");
+  }
+  function names(list) { return list.map((r) => r.replace(/^@/, "")).join(", "); }
+  function minsAgo(ts) {
+    if (!ts) return null;
     const m = (Date.now() - new Date(ts).getTime()) / 6e4;
     if (m < 1) return "just now";
-    if (m < 60) return Math.round(m) + "m ago";
-    if (m < 2880) return Math.round(m / 60) + "h ago";
-    return Math.round(m / 1440) + "d ago";
+    if (m < 60) return Math.round(m) + " min ago";
+    if (m < 2880) return Math.round(m / 60) + " h ago";
+    return Math.round(m / 1440) + " days ago";
   }
-  function days(n) { return n == null ? "" : (n < 1 ? "<1d" : Math.round(n) + "d"); }
-  function shortRepo(k) { return String(k).replace(/^[^/]+\//, ""); }
+  function untilText(ts) {
+    const d = new Date(ts), days = (d - Date.now()) / 864e5;
+    return days < 6 ? d.toLocaleDateString(undefined, { weekday: "short" }) : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  function ageOf(i) { return i.section === "mine" ? i.idleDays : i.section === "review" ? i.waitingDays : i.days; }
+  function reviewReason(i) {
+    if (i.pushedSinceMyReview) return "New commits since your review";
+    if (i.requestedMe) return "Requested from you";
+    if ((i.requestedTeams || []).length) return "Requested from " + i.requestedTeams.join(", ");
+    if ((i.areas || []).length) return "In your areas: " + i.areas.slice(0, 2).join(", ");
+    return sentence((i.reasons || [])[0] || "Suggested for you");
+  }
+  // The one-line why or waiting-on summary on line 2.
+  function whyOf(i, g) {
+    const n = i.note || {};
+    const sweep = n.question ? "Waiting on you: " + n.question : (n.next || n.left || n.why);
+    const flags = (i.flags || []).join(", ");
+    switch (g) {
+      case "fix": return join([i.action === "Approved: merge it" ? "Approved, merge it" : flags || i.action, sweep]);
+      case "chase":
+        if (i.section === "team") return join(["Approved, not merged", "Ask " + i.author + " to merge"]);
+        return join([i.action === "Nudge your reviewer" && (i.requested || []).length
+          ? "Waiting on " + names(i.requested) + " for a review" : "No reviewer requested", sweep]);
+      case "decide": return join([flags || "No activity for " + Math.round(i.idleDays || 0) + " days", sweep]);
+      case "drafts": return join([flags, sweep]) || "Draft in progress";
+      case "waiting": return join([(i.requested || []).length ? "Waiting on " + names(i.requested) : "Waiting on review", sweep]);
+      case "review": return join([reviewReason(i), n.why || n.next]);
+      case "authors": return join([i.mergeable === "CONFLICTING" ? "Merge conflict on the author's side" : "Changes requested, waiting on the author",
+        reviewReason(i)]);
+      default: return join([i.stall, (i.areas || []).length ? "Touches " + i.areas.slice(0, 2).join(", ") : ""]);
+    }
+  }
 
+  // ---- T3
+  // t3code://new?pr=... opens a draft thread about the PR in T3 Code (nothing runs until Send).
+  function newThreadUrl(i) {
+    const n = i.note || {};
+    let prompt;
+    if (i.section === "mine") {
+      prompt = "Take over " + i.url + "." + (n.next ? " Next step from the PR radar: " + n.next : "") +
+        (n.question ? " Open question: " + n.question : "");
+    } else if (i.section === "review") {
+      prompt = "I'm peer reviewing " + i.url + " by " + i.author + "." +
+        (i.pushedSinceMyReview ? " There are new commits since my last review." : "");
+    } else {
+      prompt = "Look at " + i.url + " by " + i.author + ". The PR radar says: " + i.stall +
+        " for " + Math.round(i.days || 0) + " days. Work out what it needs to get over the line, and who should do it.";
+    }
+    return "t3code://new?" + new URLSearchParams({ pr: i.url, prompt }).toString();
+  }
+  const t3Href = (u) => (typeof u === "string" && u.startsWith("t3code://") ? u : null);
+  function t3Button(i) {
+    const open = (i.threads || []).find((t) => t3Href(t.openUrl));
+    const a = el("a", "t3btn" + (open ? " linked" : ""));
+    a.append(svg("star", 12, 2.4), "Open in T3");
+    a.href = open ? open.openUrl : newThreadUrl(i);
+    a.title = open ? "Open “" + (open.title || "the linked thread") + "”"
+      : "Start a draft thread about this PR. Nothing runs until you press Send.";
+    return a;
+  }
+  // T3's built-in browser asks before following an app link, so the server opens T3 links instead.
+  document.addEventListener("click", async (ev) => {
+    if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    const a = ev.target instanceof Element ? ev.target.closest("a[href^='t3code://']") : null;
+    if (!a) return;
+    ev.preventDefault();
+    try { await api("/api/open", { url: a.href }); } catch (e) { location.href = a.href; }
+  });
+
+  // The repo's T3 project badge: the project's icon if it has one, else T3's monogram.
+  const COLORS = new Set(["gray", "red", "orange", "amber", "yellow", "lime", "green", "emerald", "teal", "cyan", "sky", "blue",
+    "indigo", "violet", "purple", "fuchsia", "pink", "rose"]);
+  const colorVar = (c) => (c === "red" ? "--red-b" : c === "amber" ? "--amber-b" : "--" + (COLORS.has(c) ? c : "blue"));
+  function badge(repo) {
+    const p = (board.projects || {})[repo] || {};
+    const b = el("span", "badge");
+    b.title = repo + (p.project && p.project !== repo.split("/")[1] ? " (T3 project " + p.project + ")" : "");
+    const icon = p.icon;
+    if (icon && icon.kind === "lucide" && /^[a-z0-9-]+$/.test(icon.name || "")) {
+      b.style.setProperty("--c", "var(" + colorVar(icon.color || p.color) + ")");
+      const i = el("i");
+      i.style.setProperty("--icon", "url(https://cdn.jsdelivr.net/npm/lucide-static@0.460.0/icons/" + icon.name + ".svg)");
+      b.append(i);
+    } else {
+      b.style.setProperty("--c", "var(" + colorVar(p.color) + ")");
+      b.textContent = p.monogram || "PR";
+    }
+    return b;
+  }
+  function avatar(login) {
+    const img = el("img", "av");
+    img.src = "/avatar/" + encodeURIComponent(login);
+    img.alt = ""; img.loading = "lazy"; img.width = img.height = 16; img.title = login;
+    img.onerror = () => { img.style.visibility = "hidden"; };
+    return img;
+  }
+
+  // ---- API
   async function api(path, body) {
     const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
-    if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
     return r.json();
   }
   async function load() {
     try { board = await api("/api/board"); $("err").textContent = board.error ? "Last refresh failed: " + board.error : ""; render(); }
     catch (e) { $("err").textContent = "Can't reach the radar server. Is it running?"; }
   }
-  // T3's built-in browser asks before following an app link, so the server opens T3 links
-  // instead. If it can't, the click falls back to the plain link (and its prompt).
-  document.addEventListener("click", async (ev) => {
-    if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
-    const a = ev.target instanceof Element ? ev.target.closest("a[href^='t3code://']") : null;
-    if (!a) return;
-    ev.preventDefault();
-    try { await api("/api/open", { url: a.href }); }
-    catch (e) { location.href = a.href; }
-  });
-  async function triage(item, action, d) {
-    try { board = await api("/api/triage", { key: item.key, action, days: d }); render(); }
+  async function triage(i, action, days) {
+    try { board = await api("/api/triage", { key: i.key, action, days }); render(); }
     catch (e) { $("err").textContent = "Couldn't save that: " + e.message; }
   }
 
-  function chips(item) {
-    const out = [];
-    (item.events || []).slice(0, 1).forEach((t) => out.push(["new", t]));
-    if (item.effort) out.push(["", item.effort === "deep" ? "deep work" : "quick win"]);
-    if (item.section === "mine") {
-      out.push(["act", item.action]);
-      (item.flags || []).forEach((f) => out.push([/conflict|failing|changes/.test(f) ? "bad" : "warn", f]));
-      if (item.draft) out.push(["", "draft"]);
-      if (item.idleDays != null) out.push(["", "idle " + days(item.idleDays)]);
-    } else if (item.section === "review") {
-      if (item.requestedMe) out.push(["act", "requested from you"]);
-      else if ((item.requestedTeams || []).length) out.push(["act", "@" + item.requestedTeams.join(", @")]);
-      if (item.pushedSinceMyReview) out.push(["warn", "new commits since your review"]);
-      (item.areas || []).slice(0, 2).forEach((a) => out.push(["", a]));
-      if ((item.approvals || []).length) out.push(["ok", "approved by " + item.approvals.join(", ")]);
-      if (item.waitingDays != null) out.push(["", "waiting " + days(item.waitingDays)]);
-    } else {
-      out.push(["act", item.stall]);
-      out.push(["", days(item.days) + " quiet"]);
-    }
-    if (item.ci === "FAILURE" || item.ci === "ERROR") { if (item.section !== "mine") out.push(["bad", "CI failing"]); }
-    else if (item.ci === "SUCCESS") out.push(["ok", "CI green"]);
-    else if (item.ci === "PENDING") out.push(["", "CI running"]);
-    return out;
+  // ---- snooze menu
+  const menu = $("snooze-menu");
+  let menuItem = null;
+  function openMenu(btn, i) {
+    menuItem = i;
+    const r = btn.getBoundingClientRect();
+    menu.hidden = false;
+    menu.style.top = (r.bottom + window.scrollY + 4) + "px";
+    menu.style.left = Math.max(8, r.right + window.scrollX - menu.offsetWidth) + "px";
+    menu.querySelector("button").focus();
   }
+  function closeMenu() { menu.hidden = true; menuItem = null; }
+  menu.addEventListener("click", (ev) => {
+    const b = ev.target.closest("button[data-days]");
+    if (b && menuItem) triage(menuItem, "snooze", Number(b.dataset.days));
+    closeMenu();
+  });
+  document.addEventListener("click", (ev) => { if (!menu.hidden && !menu.contains(ev.target) && !ev.target.closest(".snooze")) closeMenu(); });
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeMenu(); });
 
-  function row(item, parked) {
+  // ---- rows
+  function row(i, g) {
     const r = el("div", "row");
-    if (parked) r.style.opacity = ".7";
-    const main = el("div", "main");
-    main.append(refLine(item));
-    main.append(link(item.title, item.url, "title"));
-    const meta = el("div", "meta");
-    const [rc, rt] = roleChip(item);
-    meta.append(el("span", "role " + rc, rt));
-    chips(item).forEach(([c, t]) => meta.append(el("span", "chip " + c, t)));
-    if (item.section === "mine" && !item.draft && (item.requested || []).length) meta.append(waitingOn(item.requested));
-    main.append(meta);
-    const n = item.note;
-    if (n && (n.next || n.left || n.question || n.why)) {
-      const box = el("div", "note");
-      if (n.question) box.append(el("div", "q", "Waiting on you: " + n.question));
-      if (n.next) box.append(el("div", "next", n.next));
-      if (n.left) box.append(el("div", "left", n.left));
-      if (n.why) box.append(el("div", "left", n.why));
-      main.append(box);
-    } else if (item.section === "review" && (item.reasons || []).length) {
-      const box = el("div", "note");
-      box.append(el("div", "left", item.reasons.join(" · ")));
-      main.append(box);
-    }
-    // Every linked thread, newest first; the row's T3 button opens the newest one.
-    if ((item.threads || []).length) {
-      const th = el("div", "threads");
-      th.append("T3: ");
-      item.threads.forEach((t, i) => {
-        if (i) th.append(" · ");
-        if (t3Href(t.openUrl)) {
-          const a = el("a", "t3", t.title || t.id);
-          a.href = t.openUrl;
-          a.title = "Open this thread in T3 Code";
-          th.append(a);
-        } else th.append(el("span", null, t.title || t.id));
-      });
-      th.append(" · ");
-      const nt = el("a", "t3 new-thread", "new thread");
-      nt.href = newThreadUrl(item);
-      nt.title = "Start a fresh thread about this PR. It opens as a draft; nothing runs until you press Send.";
-      th.append(nt);
-      main.append(th);
-    }
-    r.append(main);
+    const left = el("div");
+    const l1 = el("div", "l1");
+    const t = el("a", "title", i.title);
+    t.href = i.url; t.target = "_blank"; t.rel = "noopener"; t.title = i.title;
+    l1.append(badge(i.repo), t, el("span", "num", "#" + i.number));
+    if (i.draft) l1.append(el("span", "draft", "Draft"));
+    const l2 = el("div", "l2");
+    const mine = i.author === board.login;
+    const why = whyOf(i, g);
+    const w = el("span", "why" + (g === "fix" && BROKEN.has(i.action) ? " red" : ""), why);
+    w.title = why;
+    l2.append(avatar(i.author), el("span", "who", mine ? "you" : i.author), el("span", "dot", "·"), w);
+    left.append(l1, l2);
+
+    const d = ageOf(i);
+    const old = d != null && d > 7;
+    const age = el("div", "age" + (old ? " old" : ""));
+    age.title = d == null ? "" : (i.section === "mine" ? "Idle for " : i.section === "review" ? "Waiting for " : "Quiet for ") + Math.round(d) + " days";
+    if (old) age.append(svg("clock", 12, 2.2));
+    age.append(el("span", null, d == null ? "" : Math.round(d) + "d"));
+
     const acts = el("div", "acts");
-    acts.append(t3Button(item));
-    if (parked) {
-      const b = el("button", null, "Bring back");
-      b.onclick = () => triage(item, "clear");
-      acts.append(b);
+    if (g === "parked") {
+      const tr = i.triage || {};
+      acts.append(el("span", "pnote", tr.action === "snooze" ? "Snoozed until " + untilText(tr.until)
+        : "Settled " + (minsAgo(tr.at) || "") + ", back when it changes"));
+      const b = el("button", "sbtn", "Bring back");
+      b.type = "button";
+      b.onclick = () => triage(i, "clear");
+      acts.append(t3Button(i), b);
     } else {
-      const done = el("button", null, "Done");
-      done.title = "Hide until this PR changes";
-      done.onclick = () => triage(item, "done");
-      const s1 = el("button", null, "Snooze 1d");
-      s1.onclick = () => triage(item, "snooze", 1);
-      const s3 = el("button", null, "3d");
-      s3.title = "Snooze 3 days";
-      s3.onclick = () => triage(item, "snooze", 3);
-      acts.append(done, s1, s3);
+      const s = el("button", "ibtn snooze");
+      s.type = "button"; s.title = "Snooze"; s.setAttribute("aria-label", "Snooze"); s.setAttribute("aria-haspopup", "menu");
+      s.append(svg("clock", 15));
+      s.onclick = (ev) => { ev.stopPropagation(); menu.hidden || menuItem !== i ? openMenu(s, i) : closeMenu(); };
+      const c = el("button", "ibtn");
+      c.type = "button"; c.title = "Settle: hide until the PR changes"; c.setAttribute("aria-label", "Settle");
+      c.append(svg("check", 15));
+      c.onclick = () => triage(i, "done");
+      acts.append(t3Button(i), s, c);
     }
-    r.append(acts);
+    r.append(left, age, acts);
     return r;
   }
 
-  function fill(section, items) {
-    const box = $(section), parked = $(section + "-parked");
-    $(section + "-sec").hidden = !!filters.role && filters.role !== section;
-    box.replaceChildren();
-    items = items.filter(passes);
-    const live = items.filter((i) => !i.hidden), hid = items.filter((i) => i.hidden);
-    $(section + "-count").textContent = live.length + (hid.length ? " · " + hid.length + " parked" : "");
-    if (!live.length) box.append(el("div", "empty", section === "mine" ? "Nothing of yours needs a move." : "Nothing here right now."));
-    if (section === "mine") {
-      let last = null;
-      live.forEach((i) => {
-        const g = i.draft ? "Drafts" : "Open for review";
-        if (g !== last) { box.append(el("div", "group-label", g)); last = g; }
-        box.append(row(i));
-      });
-    } else live.forEach((i) => box.append(row(i)));
-    parked.hidden = !hid.length;
-    parked.querySelector("summary").textContent = "Done and snoozed (" + hid.length + ")";
-    const pl = parked.querySelector(".list");
-    pl.replaceChildren();
-    hid.forEach((i) => pl.append(row(i, true)));
+  function section(g, items, emptyText) {
+    const s = el("section", g.id === "parked" ? "parked" : null);
+    s.id = "g-" + g.id;
+    const h = el("h2", g.red ? "red" : null, g.label);
+    h.append(el("span", "hint", g.hint));
+    const t = el("div", "table");
+    if (!items.length) t.append(el("div", "empty", emptyText || "Nothing here right now."));
+    items.forEach((i) => t.append(row(i, g.id)));
+    s.append(h, t);
+    return s;
   }
 
-  function renderFilters(all) {
-    const counts = {};
-    all.forEach((i) => { if (!i.hidden) counts[i.repo] = (counts[i.repo] || 0) + 1; });
-    if (filters.repo && !counts[filters.repo]) counts[filters.repo] = 0;
-    const sel = $("repo-filter");
-    sel.replaceChildren();
-    const allOpt = el("option", null, "All repositories (" + all.filter((i) => !i.hidden).length + ")");
-    allOpt.value = "";
-    sel.append(allOpt);
-    Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).forEach(([repo, n]) => {
-      const o = el("option", null, shortRepo(repo) + " (" + n + ")");
-      o.value = repo;
-      sel.append(o);
+  // Within a group: quick or deep first, otherwise the radar's own score order (never age).
+  function sorted(items) {
+    const rank = (i) => ((i.effort === "deep") === (order === "quick") ? 1 : 0);
+    return items.map((i, n) => [i, n]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map((x) => x[0]);
+  }
+
+  function setView(v, jump) {
+    view = v;
+    store.set("pr-radar-view", v);
+    render();
+    if (jump) { const s = $("g-" + jump); if (s) s.scrollIntoView({ block: "start" }); }
+    else window.scrollTo(0, 0);
+  }
+
+  function renderNav(buckets, parked) {
+    const nav = $("nav");
+    nav.querySelectorAll(".nav-h, .nav-i, .nav-sep").forEach((n) => n.remove());
+    nav.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.order === order)));
+    let head = null;
+    GROUPS.forEach((g) => {
+      if (g.nav !== head) {
+        head = g.nav;
+        const h = el("button", "nav-h", NAV_HEADS[head]);
+        h.type = "button";
+        if (head === "move") { h.title = "Show Fix, Review and Chase"; h.onclick = () => setView("move"); }
+        else { h.disabled = true; h.style.cursor = "default"; h.style.opacity = "1"; }
+        nav.append(h);
+      }
+      const n = buckets[g.id].length;
+      const b = el("button", "nav-i" + (g.nav === "move" ? " move" : ""));
+      b.type = "button";
+      b.append(el("span", null, g.label), el("span", "n" + (g.red && n ? " red" : ""), String(n)));
+      b.setAttribute("aria-current", String(view === g.id));
+      b.onclick = () => {
+        if (view === g.id) setView("move");
+        else if (g.nav === "move") setView("move", g.id);
+        else setView(g.id);
+      };
+      nav.append(b);
     });
-    sel.value = filters.repo;
-    document.querySelectorAll("#role-filter button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.role === filters.role)));
-    document.querySelectorAll("#effort-filter button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.effort === filters.effort)));
-    $("drafts-filter").checked = filters.drafts;
-    $("reset-filters").hidden = !filtersActive();
+    nav.append(el("div", "nav-sep"));
+    const p = el("button", "nav-i");
+    p.type = "button";
+    const lbl = el("span", "lbl");
+    lbl.append(svg("check", 13), PARKED.label);
+    p.append(lbl, el("span", "n", String(parked.length)));
+    p.setAttribute("aria-current", String(view === "parked"));
+    p.onclick = () => setView(view === "parked" ? "move" : "parked");
+    nav.append(p);
   }
 
-  function renderFeed(byKey) {
-    const evs = (board.events || []).filter((e) => {
-      if (filters.repo && !e.key.startsWith(filters.repo + "#")) return false;
-      const it = byKey[e.key];
-      // events for PRs no longer on the board (merged, closed) only show unfiltered
-      if (!it) return !filters.role && !filters.effort && filters.drafts;
-      return passes(it);
-    }).slice(0, 15);
-    $("feed-sec").hidden = !evs.length;
-    const fresh = evs.filter((e) => e.new).length;
-    $("feed-count").textContent = fresh ? fresh + " new" : "nothing new";
-    const box = $("feed");
-    box.replaceChildren();
-    evs.forEach((e) => {
-      const r = el("div", "ev" + (e.new ? " fresh" : ""));
-      r.append(el("time", null, ago(e.at)));
-      const body = el("div");
-      body.append(el("div", "what", e.text));
-      const on = el("div", "on");
-      on.append(shortRepo(e.key.split("#")[0]) + " #" + e.key.split("#")[1] + " ");
-      on.append(link(e.title || "", e.url));
-      body.append(on);
-      r.append(body);
-      box.append(r);
-    });
-  }
-
-  function renderSweeps() {
-    const sw = board.sweeps || [];
-    $("sweeps-sec").hidden = !sw.length && !board.sweepsEnabled;
-    const running = sw.some((s) => s.status === "running");
+  function renderStatus() {
+    const sw = (board.sweeps || [])[0];
+    const st = $("status");
+    st.replaceChildren(board.refreshing ? "Refreshing…" : "Refreshed " + (minsAgo(board.refreshedAt) || "never"), " · ");
+    if (!sw) st.append(board.sweepsEnabled ? "no sweeps yet" : "sweeps off");
+    else if (sw.status === "running") st.append("sweeping now");
+    else if (sw.status === "error") {
+      const e = el("span", "bad", "last sweep failed " + minsAgo(sw.started_at));
+      e.title = sw.summary || "";
+      st.append(e);
+    } else st.append("last sweep " + minsAgo(sw.finished_at || sw.started_at));
+    const running = !!sw && sw.status === "running";
     $("sweep").disabled = running || !board.sweepsEnabled;
     $("sweep").textContent = running ? "Sweeping…" : "Sweep now";
-    const cost = sw.reduce((a, s) => a + (s.cost_usd || 0), 0);
-    $("sweeps-count").textContent = sw.length ? sw.length + " recent · $" + cost.toFixed(2) : "none yet";
-    const box = $("sweeps");
-    box.replaceChildren();
-    if (!sw.length) box.append(el("div", "empty", "No sweeps yet. The first one runs when something moves, or press Sweep now."));
-    sw.forEach((s) => {
-      const r = el("div", "sw");
-      const head = el("div", "head");
-      head.append(el("time", null, ago(s.started_at)), el("span", "st " + s.status, s.status),
-        el("span", null, s.reason || ""));
-      if (s.cost_usd != null) head.append(el("span", "chip", "$" + s.cost_usd.toFixed(2) + " · " + (s.turns || 0) + " turns"));
-      r.append(head);
-      if (s.summary) {
-        const d = el("details");
-        if (s.status === "error") d.open = true;
-        d.append(el("summary", null, s.status === "error" ? "What went wrong" : "Report"), el("pre", null, s.summary));
-        r.append(d);
-      }
-      if (s.log_path) r.append(el("div", "log", "Log: " + s.log_path));
-      box.append(r);
-    });
+    $("refresh").disabled = !!board.refreshing;
   }
 
   function render() {
     if (!board) return;
-    if ($("who").dataset.login !== board.login) {
-      $("who").dataset.login = board.login;
-      const me = el("span", "who");
-      me.append(avatar(board.login), board.org + " · " + board.login);
-      $("who").replaceChildren(me);
+    renderStatus();
+    const buckets = Object.fromEntries(GROUPS.map((g) => [g.id, []]));
+    const parked = [];
+    // mine, then review, then team: each already in the radar's score order
+    [].concat(board.mine, board.review, board.team).forEach((i) => (i.hidden ? parked : buckets[groupOf(i)]).push(i));
+    for (const k in buckets) buckets[k] = sorted(buckets[k]);
+    renderNav(buckets, parked);
+    const main = $("main");
+    main.replaceChildren();
+    if (view === "parked") main.append(section(PARKED, parked, "Nothing settled or snoozed."));
+    else if (view !== "move") main.append(section(GROUPS.find((g) => g.id === view), buckets[view]));
+    else {
+      const move = GROUPS.filter((g) => g.nav === "move");
+      if (move.every((g) => !buckets[g.id].length)) main.append(el("div", "empty", "Nothing needs a move from you. The sidebar has what's waiting on others."));
+      move.forEach((g) => { if (buckets[g.id].length) main.append(section(g, buckets[g.id])); });
     }
-    $("fresh").textContent = (board.refreshing ? "Refreshing… · " : "") + "GitHub " + ago(board.refreshedAt) +
-      " · triaged " + ago(board.triagedAt) + " · " + board.totals.open + " open PRs";
-    $("refresh").disabled = !!board.refreshing;
-    $("headline").textContent = board.headline || "No sweep has written a headline yet. Ask for a sweep in the pr-radar T3 thread.";
-    const rh = board.rhythm;
-    $("mode").textContent = !rh ? "" : rh.mode === "off"
-      ? (rh.next ? "for " + rh.next.day + " " + rh.next.from + " · " + rh.next.label : "outside working hours")
-      : rh.label + " until " + rh.to;
-    const all = [].concat(board.mine, board.review, board.team);
-    const byKey = Object.fromEntries(all.map((i) => [i.key, i]));
-    renderFilters(all);
-    renderFeed(byKey);
-    const picks = (board.picks || []).filter((p) => byKey[p.key] && !byKey[p.key].hidden && passes(byKey[p.key]));
-    $("picks-sec").hidden = !picks.length;
-    const pk = $("picks");
-    pk.replaceChildren();
-    picks.forEach((p) => {
-      const it = byKey[p.key];
-      const c = el("div", "pick");
-      const head = el("div", "meta");
-      const [rc, rt] = roleChip(it);
-      head.append(refLine(it, "ref inline"), el("span", "role " + rc, rt));
-      c.append(head);
-      c.append(link(it.title, it.url, "t"));
-      if (p.why) c.append(el("div", "why", p.why));
-      const foot = el("div", "pick-foot");
-      foot.append(t3Button(it));
-      c.append(foot);
-      pk.append(c);
-    });
-    fill("mine", board.mine);
-    fill("review", board.review);
-    fill("team", board.team);
-    renderSweeps();
-    const bots = Object.entries(board.botPRsByRepo || {});
-    $("bots").textContent = bots.length ? "Bot PRs left out: " + bots.map(([r, n]) => shortRepo(r) + " " + n).join(", ") : "";
   }
 
-  $("repo-filter").onchange = (e) => { filters.repo = e.target.value; saveFilters(); render(); };
-  document.querySelectorAll("#role-filter button").forEach((b) => {
-    b.onclick = () => { filters.role = b.dataset.role; saveFilters(); render(); };
+  document.querySelectorAll(".seg button").forEach((b) => {
+    b.onclick = () => { order = b.dataset.order; store.set("pr-radar-order", order); render(); };
   });
-  document.querySelectorAll("#effort-filter button").forEach((b) => {
-    b.onclick = () => { filters.effort = b.dataset.effort; saveFilters(); render(); };
-  });
-  $("drafts-filter").onchange = (e) => { filters.drafts = e.target.checked; saveFilters(); render(); };
-  $("reset-filters").onclick = () => { filters = Object.assign({}, DEFAULT_FILTERS); saveFilters(); render(); };
-
   $("sweep").onclick = async () => {
     $("sweep").disabled = true;
     $("sweep").textContent = "Sweeping…";
     try { await api("/api/sweep", {}); } catch (e) { $("err").textContent = e.message; }
     setTimeout(load, 1500);
   };
-
   $("refresh").onclick = async () => {
     $("refresh").disabled = true;
-    $("fresh").textContent = "Refreshing from GitHub…";
+    $("status").textContent = "Refreshing…";
     try { board = await api("/api/refresh", {}); render(); } catch (e) { $("err").textContent = e.message; }
   };
-  // Mark the feed as seen once you've had the page open for a while, so the next visit shows only what's new.
-  function markViewed() { if (!viewedSent && document.visibilityState === "visible") { viewedSent = true; setTimeout(() => api("/api/viewed", {}).catch(() => {}), 20000); } }
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { viewedSent = false; load(); markViewed(); } });
-  load().then(markViewed);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") load(); });
+  load();
   setInterval(load, 60000);
 })();
 </script>

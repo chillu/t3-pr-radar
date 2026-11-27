@@ -49,7 +49,7 @@ connection.
 
 - `radar.ts`: the engine, the CLI and the server, in erasable TypeScript that Node runs directly. Run `node radar.ts --help`. Built on Node's own modules: `node:sqlite`, `node:http`, `node:child_process`, `util.parseArgs` and `Temporal`.
 - `package.json` (`type` and `engines` only) and `tsconfig.json` (type-check only, `noEmit`).
-- `web/index.html`: the page. It polls `/api/board` every minute and posts Done, Snooze and Refresh back to the server.
+- `web/index.html`: the page, in T3 Code's default theme. A sidebar of groups (Your move: Fix, Review, Chase; Later; Not on you; Settled and snoozed) and one table per group. It polls `/api/board` every minute and posts Settle, Snooze, Bring back and Refresh back to the server.
 - `users/<login>/`: `profile.json` (scoring weights), `profile.md` (the same in prose), `config.json` (rhythm, refresh cadence, notifications, schedule). The `radar.db` and `logs/` in there are gitignored.
 - `.agents/skills/pr-radar`: the sweep, which is the judgement half.
 - `.agents/skills/pr-radar-setup`: profile, rhythm, notifications, install and schedule for a new person. Start here.
@@ -62,6 +62,7 @@ node radar.ts refresh --user <login> --full   # first fill
 node radar.ts serve --user <login> --sweeps   # or ./bin/install-launchd <login>
 node radar.ts sweep --user <login> --dry-run  # would a sweep run now, and why?
 pbpaste | node radar.ts t3-mcp --user <login> # let sweeps read T3 threads (T3 → Settings → Copy MCP URL)
+node radar.ts t3-projects --user <login> projects.json  # seed the badges from saved t3_project_list output
 ```
 
 To type-check after a change (TypeScript and Node's types stay out of `package.json`):
@@ -78,6 +79,7 @@ npx -y -p typescript tsc --noEmit
 - **No per-PR watches.** T3's `watch_pull_request` starts an agent turn on every event, which suits one PR you're actively babysitting, not a hundred. The light poll replaces it here.
 - **Rhythm.** Every item is tagged `deep` or `quick` (a review counts as deep at 300+ lines or 15+ files). Sweeps pick for your current block: deep work in the morning, quick wins in the afternoon, or whatever your config says.
 - **Into T3 Code.** Each row links its T3 threads with `t3code://threads/<environmentId>/<threadId>`, and offers "New T3 thread" as `t3code://new?pr=<url>&prompt=<text>`. T3 opens that link as a draft, and nothing runs until you press Send. T3's built-in browser asks before following any app link, so the page hands these links to the server (`POST /api/open`, same origin only), which opens them with macOS `open`. If that fails, the click falls back to the plain link and its prompt. Both routes come from T3's `packages/shared/src/promptLinks.ts`. T3 also has its own `/pull-requests` view (with `involvement=authored|reviewing`), but it has no app link, and it doesn't know your profile or rhythm.
+- **Project badges match T3.** Each refresh fetches T3's project list through the same MCP URL and caches it. A PR's repo maps to the T3 project with that `repositoryIdentity` (the one opened at the repo root wins), and the badge uses the project's icon or T3's own monogram rule (`projectMonogram` and `projectColor` in `radar.ts`, decompiled from the app). Repos with no T3 project get the monogram of their name.
 - **Read-only toward GitHub.** Nothing here comments, reviews, approves or merges.
 
 History: written in Python first, ported to dependency-free Node on 2026-11-27
