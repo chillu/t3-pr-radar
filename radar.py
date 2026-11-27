@@ -26,6 +26,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 from collections import Counter, defaultdict
 from zoneinfo import ZoneInfo
 
@@ -585,14 +586,24 @@ def hidden(item, tri):
     return False
 
 
+def t3_thread_url(environment_id, thread_id):
+    """A link the T3 Code desktop app opens straight to the thread (t3code://threads/<env>/<thread>)."""
+    q = lambda v: urllib.parse.quote(v, safe="")
+    return f"t3code://threads/{q(environment_id)}/{q(thread_id)}"
+
+
 def build_board(user):
     profile, config = user.profile, user.config
     con = user.db()
     rows = [json.loads(r["item"]) for r in con.execute("select item from prs where open=1")]
     threads = defaultdict(list)
+    default_env = config.get("t3", {}).get("environmentId")
     for r in con.execute("select * from threads order by updated_at desc"):
+        m = re.search(r"t3-thread://v2/([^/]+)/", r["link"] or "")
+        env = m.group(1) if m else default_env
         threads[r["key"]].append({"id": r["thread_id"], "title": r["title"], "link": r["link"],
-                                  "updatedAt": r["updated_at"], "status": r["status"]})
+                                  "updatedAt": r["updated_at"], "status": r["status"],
+                                  "openUrl": t3_thread_url(env, r["thread_id"]) if env else None})
     notes = {r["key"]: {"basis": r["basis"], "next": r["next"], "left": r["left_"], "question": r["question"],
                         "why": r["why"], "at": r["at"]} for r in con.execute("select * from notes")}
     tri = {r["key"]: dict(r) for r in con.execute("select * from triage")}

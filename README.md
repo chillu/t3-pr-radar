@@ -38,6 +38,7 @@ python3 radar.py serve --user <login>            # or ./bin/install-launchd <log
 - **Fetching is a script; judgement is Claude.** The server never calls a model. A sweep only reads what moved: own PRs whose PR or T3 thread changed since their note.
 - **No per-PR watches.** T3's `watch_pull_request` starts an agent turn on every event, which suits one PR you're actively babysitting, not a hundred. The light poll replaces it here.
 - **Rhythm.** Every item is tagged `deep` or `quick` (a review counts as deep at 300+ lines or 15+ files). Sweeps pick for your current block: deep work in the morning, quick wins in the afternoon, or whatever your config says.
+- **Into T3 Code.** Each row links its T3 threads with `t3code://threads/<environmentId>/<threadId>`, and offers "New T3 thread" as `t3code://new?pr=<url>&prompt=<text>`. T3 opens that link as a draft, and nothing runs until you press Send. Both routes come from T3's `packages/shared/src/promptLinks.ts`. T3 also has its own `/pull-requests` view (with `involvement=authored|reviewing`), but it has no app link, and it doesn't know your profile or rhythm.
 - **Read-only toward GitHub.** Nothing here comments, reviews, approves or merges.
 
 History: this started as an artifact-backed skill in `Runn-Fast/agent-context`

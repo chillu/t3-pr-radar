@@ -58,7 +58,10 @@ section { display: grid; gap: 10px; }
 .note { font-size: 13px; display: grid; gap: 2px; max-width: 70ch; }
 .note .next { font-weight: 500; } .note .q { color: var(--accent); } .note .left { color: var(--muted); }
 .threads { font-size: 12px; color: var(--muted); }
-.threads span { font-family: var(--f-mono); }
+.threads span, .threads a.t3 { font-family: var(--f-mono); }
+.threads a.t3 { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 2px; }
+.threads a.t3:hover { text-decoration-color: currentColor; }
+.threads a.new-thread { color: var(--accent); }
 .acts { display: flex; gap: 6px; align-items: start; }
 button { font: inherit; font-size: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 4px; padding: 3px 9px; cursor: pointer; white-space: nowrap; }
 button:hover { border-color: var(--muted); }
@@ -167,6 +170,23 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
   function passes(item) {
     return (!filters.repo || item.repo === filters.repo) && (!filters.role || roleOf(item) === filters.role);
   }
+  // t3code://new?pr=... opens a draft thread about the PR in T3 Code (nothing runs until Send).
+  function newThreadUrl(item) {
+    const n = item.note || {};
+    let prompt;
+    if (item.section === "mine") {
+      prompt = "Take over " + item.url + "." + (n.next ? " Next step from the PR radar: " + n.next : "") +
+        (n.question ? " Open question: " + n.question : "");
+    } else if (item.section === "review") {
+      prompt = "I'm peer reviewing " + item.url + " by " + item.author + "." +
+        (item.pushedSinceMyReview ? " There are new commits since my last review." : "");
+    } else {
+      prompt = "Look at " + item.url + " by " + item.author + ". The PR radar says: " + item.stall +
+        " for " + Math.round(item.days || 0) + " days. Work out what it needs to get over the line, and who should do it.";
+    }
+    const q = new URLSearchParams({ pr: item.url, prompt });
+    return "t3code://new?" + q.toString();
+  }
   function roleChip(item) {
     if (item.section === "mine") return ["mine", "authored by you"];
     if (item.section === "review") {
@@ -266,12 +286,23 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
       box.append(el("div", "left", item.reasons.join(" · ")));
       main.append(box);
     }
-    if ((item.threads || []).length) {
-      const th = el("div", "threads");
-      th.append("T3: ");
-      item.threads.forEach((t, i) => { if (i) th.append(" · "); th.append(el("span", null, t.title || t.id)); });
-      main.append(th);
-    }
+    const th = el("div", "threads");
+    th.append("T3: ");
+    (item.threads || []).forEach((t, i) => {
+      if (i) th.append(" · ");
+      if (typeof t.openUrl === "string" && t.openUrl.startsWith("t3code://")) {
+        const a = el("a", "t3", t.title || t.id);
+        a.href = t.openUrl;
+        a.title = "Open this thread in T3 Code";
+        th.append(a);
+      } else th.append(el("span", null, t.title || t.id));
+    });
+    if ((item.threads || []).length) th.append(" · ");
+    const nt = el("a", "t3 new-thread", "New T3 thread");
+    nt.href = newThreadUrl(item);
+    nt.title = "Opens a draft in T3 Code. Nothing runs until you press Send.";
+    th.append(nt);
+    main.append(th);
     r.append(main);
     const acts = el("div", "acts");
     if (parked) {
