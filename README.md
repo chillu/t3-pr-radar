@@ -7,8 +7,9 @@ has three queues:
 - the reviews you're best placed for: requests to you or your teams, then your profile's areas and people
 - team PRs that are close to done but stalled
 
-It's a page at http://127.0.0.1:7424, served by `radar.py` from a SQLite file.
-Nothing is hosted.
+It's a page at http://127.0.0.1:7424, served by `radar.ts` from a SQLite file.
+Nothing is hosted, and nothing is installed: it needs Node 24 or later, `gh` and,
+for sweeps, the `claude` CLI.
 
 ## Two cadences
 
@@ -19,7 +20,8 @@ Nothing is hosted.
 
 ## Layout
 
-- `radar.py`: the engine, the CLI and the server. Run `python3 radar.py --help`.
+- `radar.ts`: the engine, the CLI and the server, in erasable TypeScript that Node runs directly. Run `node radar.ts --help`. Built on Node's own modules: `node:sqlite`, `node:http`, `node:child_process`, `util.parseArgs` and `Temporal`.
+- `package.json` (`type` and `engines` only) and `tsconfig.json` (type-check only, `noEmit`).
 - `web/index.html`: the page. It polls `/api/board` every minute and posts Done, Snooze and Refresh back to the server.
 - `users/<login>/`: `profile.json` (scoring weights), `profile.md` (the same in prose), `config.json` (rhythm, refresh cadence, notifications, schedule). The `radar.db` and `logs/` in there are gitignored.
 - `.agents/skills/pr-radar`: the sweep, which is the judgement half.
@@ -29,10 +31,17 @@ Nothing is hosted.
 ## Running it
 
 ```sh
-python3 radar.py refresh --user <login> --full   # first fill
-python3 radar.py serve --user <login> --sweeps   # or ./bin/install-launchd <login>
-python3 radar.py sweep --user <login> --dry-run  # would a sweep run now, and why?
-pbpaste | python3 radar.py t3-mcp --user <login> # let sweeps read T3 threads (T3 → Settings → Copy MCP URL)
+node radar.ts refresh --user <login> --full   # first fill
+node radar.ts serve --user <login> --sweeps   # or ./bin/install-launchd <login>
+node radar.ts sweep --user <login> --dry-run  # would a sweep run now, and why?
+pbpaste | node radar.ts t3-mcp --user <login> # let sweeps read T3 threads (T3 → Settings → Copy MCP URL)
+```
+
+To type-check after a change (TypeScript and Node's types stay out of `package.json`):
+
+```sh
+npm install --no-save --no-package-lock @types/node@24   # once, into the gitignored node_modules
+npx -y -p typescript tsc --noEmit
 ```
 
 ## Design notes
@@ -44,6 +53,8 @@ pbpaste | python3 radar.py t3-mcp --user <login> # let sweeps read T3 threads (T
 - **Into T3 Code.** Each row links its T3 threads with `t3code://threads/<environmentId>/<threadId>`, and offers "New T3 thread" as `t3code://new?pr=<url>&prompt=<text>`. T3 opens that link as a draft, and nothing runs until you press Send. Both routes come from T3's `packages/shared/src/promptLinks.ts`. T3 also has its own `/pull-requests` view (with `involvement=authored|reviewing`), but it has no app link, and it doesn't know your profile or rhythm.
 - **Read-only toward GitHub.** Nothing here comments, reviews, approves or merges.
 
-History: this started as an artifact-backed skill in `Runn-Fast/agent-context`
+History: written in Python first, ported to dependency-free Node on 2026-11-27
+with identical output (checked by running both against copies of the same
+database). It started as an artifact-backed skill in `Runn-Fast/agent-context`
 (`projects/pr-radar/`). It moved here when the artifact proved unable to
 refresh itself.

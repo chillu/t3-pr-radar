@@ -21,7 +21,7 @@ each person sets it up on their own machine.
 
 ## 1. Build the profile
 
-1. Run `python3 radar.py stats <login> --out $TMPDIR/stats-<login>.json`. It summarises a year of authored and reviewed PRs: repos, conventional-commit scopes, directories at depths 2 to 4, who they review, the teams of the logged-in `gh` user, and when they open PRs (`activity`).
+1. Run `node radar.ts stats <login> --out $TMPDIR/stats-<login>.json`. It summarises a year of authored and reviewed PRs: repos, conventional-commit scopes, directories at depths 2 to 4, who they review, the teams of the logged-in `gh` user, and when they open PRs (`activity`).
 2. Draft **areas**: five to nine named clusters of work. Each has fnmatch `paths` (`*` matches across `/`), title `keywords`, and a `weight` from 1 to 3.
    - Merge what authoring and reviewing both show. Weight an area by how much of their work lands there and how specialised it is. Lockfile churn isn't an area.
    - Repos get restructured (in runn, `app/` moved to `apps/rails/app/`), so cover both the old and the new paths.
@@ -44,7 +44,7 @@ radar picks for the block the person is in.
    - When they do their best deep work, such as big reviews and gnarly fixes.
    - When they prefer quick wins: merges, small reviews, nudges, closing stale drafts.
    - Anything fixed in their day, such as standups or a no-meetings morning.
-3. Write `rhythm` in `config.json`: `timezone`, `workdays` (ISO, Monday is 1), and `blocks`. Each block has a `mode` (`deep` or `quick`), a `label` for the page, `from` and `to` as `HH:MM`, and `prefer` in their own words. Check it with `python3 radar.py rhythm --user <login>`.
+3. Write `rhythm` in `config.json`: `timezone`, `workdays` (ISO, Monday is 1), and `blocks`. Each block has a `mode` (`deep` or `quick`), a `label` for the page, `from` and `to` as `HH:MM`, and `prefer` in their own words. Check it with `node radar.ts rhythm --user <login>`.
 4. Set `refresh` in `config.json`: `workingMinutes` (default 5) and `offHoursMinutes` (default 60). A refresh with nothing changed costs about 2 GraphQL points.
 
 ## 3. Notifications
@@ -65,8 +65,8 @@ A short list beats a noisy one. `[]` turns them off.
 
 ## 4. Install and schedule
 
-1. Run `python3 radar.py refresh --user <login> --full` once, then `python3 radar.py board --user <login>`. Show them the review and team queues, and tune the weights until the lists look right.
-2. Run `./bin/install-launchd <login>`. It installs a LaunchAgent that keeps `radar.py serve` running at login, and prints the page URL. Its sandbox and permission needs are in the script's header. The person runs it in their own terminal if the agent can't.
+1. Run `node radar.ts refresh --user <login> --full` once, then `node radar.ts board --user <login>`. Show them the review and team queues, and tune the weights until the lists look right.
+2. Run `./bin/install-launchd <login>`. It installs a LaunchAgent that keeps `node radar.ts serve` running at login, and prints the page URL. Its sandbox and permission needs are in the script's header. The person runs it in their own terminal if the agent can't.
 3. **T3 Code:** add the repo as a T3 project if it isn't one yet, and start a thread in it titled `pr-radar: sweeps for <login>`. From inside that thread, create one `schedule_task` per sweep time:
    - `fixed_time` with `timeOfDay` in local time and `weekdays` (0 is Sunday)
    - `bindToCurrentThread: true`, so the runs post into that thread and the person can ask for a sweep there at any time

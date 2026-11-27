@@ -1,5 +1,5 @@
 .DS_Store
-__pycache__/
 users/*/radar.db*
 users/*/logs/
 users/*/t3-mcp.json
+node_modules/
