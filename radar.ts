@@ -1225,12 +1225,15 @@ class Server {
       return send(reason ? 200 : 409, { started: !!reason, error: reason ? null : "a sweep is already running" });
     }
     if (url === "/api/open") {
-      // T3's built-in browser asks before following any app link. The server opens T3's own
-      // links through macOS instead, so a click goes straight to the thread or draft.
+      // T3's built-in browser asks before following any app link, and isn't signed in to GitHub.
+      // The server opens T3's own links and GitHub links through macOS instead: a click goes
+      // straight to the thread or draft, and GitHub opens in the default browser.
       if (origin === undefined) return send(403, { error: "origin required" });
       const target = typeof body.url === "string" ? URL.parse(body.url) : null;
-      if (!target || target.protocol !== "t3code:" || !["threads", "new"].includes(target.hostname))
-        return send(400, { error: "only t3code://threads and t3code://new links" });
+      const t3 = target?.protocol === "t3code:" && ["threads", "new"].includes(target.hostname);
+      const github = target?.protocol === "https:" && target.hostname === "github.com" && !target.username && !target.password;
+      if (!target || !(t3 || github))
+        return send(400, { error: "only t3code://threads, t3code://new and https://github.com links" });
       const r = await run("open", [target.href]);
       return send(r.code ? 500 : 200, r.code ? { error: r.stderr.trim() || "open failed" } : { ok: true });
     }
