@@ -3,3 +3,4 @@ users/*/radar.db*
 users/*/logs/
 users/*/t3-mcp.json
 node_modules/
+users/*/avatars/

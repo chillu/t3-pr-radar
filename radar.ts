@@ -895,6 +895,42 @@ async function runSweep(user: User, reason: string): Promise<number> {
   return sweepId;
 }
 
+// ---------------------------------------------------------------- avatars
+
+/** GitHub's login charset, plus the [bot] suffix of app accounts. Anything else never reaches the filesystem. */
+const AVATAR_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/;
+const AVATAR_MAX_AGE_MS = 30 * DAY;
+const AVATAR_RETRY_MS = HOUR; // after a failed fetch, before trying GitHub again
+const AVATAR_MAX_BYTES = 1024 * 1024;
+
+/** The image type from its first bytes, or null when it isn't an image we serve. */
+function imageType(buf: Buffer): string | null {
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf.subarray(0, 4).toString("latin1") === "GIF8") return "image/gif";
+  if (buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  return null;
+}
+
+/**
+ * Fetch https://github.com/<login>.png?size=40 (it redirects to avatars.githubusercontent.com).
+ * App accounts 404 there as `name[bot]`, but most serve their icon under the bare name.
+ */
+async function fetchAvatar(login: string): Promise<Buffer | null> {
+  const names = login.endsWith("[bot]") ? [login, login.slice(0, -"[bot]".length)] : [login];
+  for (const name of names) {
+    try {
+      const res = await fetch(`https://github.com/${encodeURIComponent(name)}.png?size=40`, {
+        redirect: "follow", signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) continue;
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length <= AVATAR_MAX_BYTES && imageType(buf)) return buf;
+    } catch { /* try the next name */ }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- server
 
 class Server {
@@ -904,11 +940,46 @@ class Server {
   refreshing: Promise<Obj | null> | null = null;
   lastError: string | null = null;
   sweeping = false;
+  avatarFetches = new Map<string, Promise<Buffer | null>>(); // one GitHub fetch per login at a time
+  avatarFailures = new Map<string, number>(); // login -> when its last fetch failed
 
   constructor(user: User, notifyOn: boolean, sweepsOn: boolean) {
     this.user = user;
     this.notifyOn = notifyOn;
     this.sweepsOn = sweepsOn;
+  }
+
+  /**
+   * The avatar for a GitHub login, from users/<user>/avatars/<login>.png when it's under 30 days old,
+   * otherwise fetched once and saved. A stale file still serves if the refetch fails. Null: no avatar.
+   */
+  async avatar(login: string): Promise<Buffer | null> {
+    if (!AVATAR_LOGIN.test(login)) return null;
+    const dir = path.join(this.user.dir, "avatars");
+    const file = path.join(dir, `${login}.png`);
+    let cached: Buffer | null = null;
+    try {
+      const st = fs.statSync(file);
+      cached = fs.readFileSync(file);
+      if (Date.now() - st.mtimeMs < AVATAR_MAX_AGE_MS) return cached;
+    } catch { /* not cached yet */ }
+    const failedAt = this.avatarFailures.get(login);
+    if (failedAt && Date.now() - failedAt < AVATAR_RETRY_MS) return cached;
+    let pending = this.avatarFetches.get(login);
+    if (!pending) {
+      pending = fetchAvatar(login).then((buf) => {
+        if (buf) {
+          fs.mkdirSync(dir, { recursive: true });
+          const tmp = `${file}.${process.pid}.tmp`;
+          fs.writeFileSync(tmp, buf);
+          fs.renameSync(tmp, file);
+          this.avatarFailures.delete(login);
+        } else this.avatarFailures.set(login, Date.now());
+        return buf;
+      }).finally(() => this.avatarFetches.delete(login));
+      this.avatarFetches.set(login, pending);
+    }
+    return (await pending) ?? cached;
   }
 
   /** Refresh unless one is running; the page's button waits for the running one instead. */
@@ -959,6 +1030,14 @@ class Server {
     if (req.method === "GET") {
       if (url === "/" || url === "/index.html") return send(200, fs.readFileSync(path.join(ROOT, "web", "index.html")), "text/html; charset=utf-8");
       if (url === "/api/board") return send(200, this.board());
+      if (url.startsWith("/avatar/")) {
+        let login = "";
+        try { login = decodeURIComponent(url.slice("/avatar/".length).split("?")[0]); } catch { /* malformed escape */ }
+        const img = await this.avatar(login);
+        if (!img) return send(404, { error: "no avatar" });
+        res.writeHead(200, { "Content-Type": imageType(img)!, "Cache-Control": "private, max-age=86400" });
+        return void res.end(img);
+      }
       return send(404, { error: "not found" });
     }
     if (req.method !== "POST") return send(405, { error: "method not allowed" });

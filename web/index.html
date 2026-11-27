@@ -67,6 +67,12 @@ button { font: inherit; font-size: 12px; border: 1px solid var(--line); backgrou
 button:hover { border-color: var(--muted); }
 button[disabled] { opacity: .5; cursor: default; }
 button.primary { border-color: var(--accent); color: var(--accent); }
+.av { width: 16px; height: 16px; border-radius: 50%; background: var(--chip); flex: none; object-fit: cover; }
+.av.sm { width: 14px; height: 14px; }
+.who { display: inline-flex; align-items: center; gap: 5px; vertical-align: bottom; }
+.ref.inline { display: inline; }
+.chip.waiting { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; white-space: normal; }
+.chip.waiting .who { gap: 3px; }
 a.btn { display: inline-block; font-size: 12px; line-height: 1.5; border: 1px solid var(--line); border-radius: 4px; padding: 3px 9px; white-space: nowrap; text-decoration: none; color: var(--ink); background: var(--surface); }
 a.btn:hover { border-color: var(--muted); }
 a.t3btn { color: var(--muted); }
@@ -224,6 +230,41 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     const q = new URLSearchParams({ pr: item.url, prompt });
     return "t3code://new?" + q.toString();
   }
+  // A 16px round GitHub avatar, served and cached by the radar server. Hidden if there isn't one.
+  function avatar(login, cls) {
+    const img = el("img", "av" + (cls ? " " + cls : ""));
+    img.src = "/avatar/" + encodeURIComponent(login);
+    img.alt = "";
+    img.loading = "lazy";
+    img.width = img.height = cls === "sm" ? 14 : 16;
+    img.title = login;
+    img.onerror = () => { img.hidden = true; };
+    return img;
+  }
+  // "repo #123", plus the author with their avatar on other people's PRs.
+  function refLine(item, cls) {
+    const ref = el("div", cls || "ref");
+    ref.append(shortRepo(item.repo) + " #" + item.number);
+    if (item.section !== "mine" && item.author) {
+      ref.append(" · ");
+      const who = el("span", "who");
+      who.append(avatar(item.author), item.author);
+      ref.append(who);
+    }
+    return ref;
+  }
+  // Who's holding one of your PRs: pending reviewers with their avatars, teams by name.
+  function waitingOn(requested) {
+    const chip = el("span", "chip waiting");
+    chip.append("waiting on");
+    requested.forEach((r, i) => {
+      const p = el("span", "who");
+      if (!r.startsWith("@")) p.append(avatar(r, "sm"));
+      p.append(r + (i < requested.length - 1 ? "," : ""));
+      chip.append(p);
+    });
+    return chip;
+  }
   function t3Href(u) { return typeof u === "string" && u.startsWith("t3code://") ? u : null; }
   // The one way into T3 for a PR: its newest linked thread, or a draft thread about it.
   function t3Button(item) {
@@ -291,7 +332,6 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
       out.push(["act", item.action]);
       (item.flags || []).forEach((f) => out.push([/conflict|failing|changes/.test(f) ? "bad" : "warn", f]));
       if (item.draft) out.push(["", "draft"]);
-      else if ((item.requested || []).length) out.push(["", "waiting on " + item.requested.join(", ")]);
       if (item.idleDays != null) out.push(["", "idle " + days(item.idleDays)]);
     } else if (item.section === "review") {
       if (item.requestedMe) out.push(["act", "requested from you"]);
@@ -314,12 +354,13 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     const r = el("div", "row");
     if (parked) r.style.opacity = ".7";
     const main = el("div", "main");
-    main.append(el("div", "ref", shortRepo(item.repo) + " #" + item.number + (item.section !== "mine" ? " · " + item.author : "")));
+    main.append(refLine(item));
     main.append(link(item.title, item.url, "title"));
     const meta = el("div", "meta");
     const [rc, rt] = roleChip(item);
     meta.append(el("span", "role " + rc, rt));
     chips(item).forEach(([c, t]) => meta.append(el("span", "chip " + c, t)));
+    if (item.section === "mine" && !item.draft && (item.requested || []).length) meta.append(waitingOn(item.requested));
     main.append(meta);
     const n = item.note;
     if (n && (n.next || n.left || n.question || n.why)) {
@@ -478,7 +519,12 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
 
   function render() {
     if (!board) return;
-    $("who").textContent = board.org + " · " + board.login;
+    if ($("who").dataset.login !== board.login) {
+      $("who").dataset.login = board.login;
+      const me = el("span", "who");
+      me.append(avatar(board.login), board.org + " · " + board.login);
+      $("who").replaceChildren(me);
+    }
     $("fresh").textContent = (board.refreshing ? "Refreshing… · " : "") + "GitHub " + ago(board.refreshedAt) +
       " · triaged " + ago(board.triagedAt) + " · " + board.totals.open + " open PRs";
     $("refresh").disabled = !!board.refreshing;
@@ -500,7 +546,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
       const c = el("div", "pick");
       const head = el("div", "meta");
       const [rc, rt] = roleChip(it);
-      head.append(el("span", "ref", shortRepo(it.repo) + " #" + it.number), el("span", "role " + rc, rt));
+      head.append(refLine(it, "ref inline"), el("span", "role " + rc, rt));
       c.append(head);
       c.append(link(it.title, it.url, "t"));
       if (p.why) c.append(el("div", "why", p.why));
