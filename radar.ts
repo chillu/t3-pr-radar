@@ -993,8 +993,8 @@ function sweepPrompt(user: User, reason: string, hasT3: boolean): string {
   return (
     `Run a pr-radar sweep for ${user.login}, following .agents/skills/pr-radar/SKILL.md exactly. ` +
     `This sweep was triggered because: ${reason}. ` +
-    "This is a headless run started by radar.ts: nobody can answer questions, there is no T3 thread to " +
-    "settle (skip step 6), and the page picks up your notes and picks on its own. " +
+    "This is a headless run started by radar.ts: nobody can answer questions, there is no T3 thread, " +
+    "and the page picks up your notes and picks on its own. " +
     (hasT3
       ? "T3's tools are available through the MCP server named t3 (tool names start with mcp__t3__); load them with ToolSearch. "
       : "T3's tools are not available in this run: skip step 2 and work from the threads already linked. ") +
@@ -1028,12 +1028,13 @@ async function runSweep(user: User, reason: string): Promise<number> {
     return Number(res.lastInsertRowid);
   });
 
-  const mcp: string | null = cfg.mcpConfig ? path.join(ROOT, cfg.mcpConfig) : null;
-  const hasT3 = !!(mcp && fs.existsSync(mcp));
+  // sweep.mcpConfig in config.json, else the file `t3-mcp` writes
+  const mcp: string = cfg.mcpConfig ? path.join(ROOT, cfg.mcpConfig) : path.join(user.dir, "t3-mcp.json");
+  const hasT3 = fs.existsSync(mcp);
   const args = ["-p", sweepPrompt(user, reason, hasT3), "--output-format", "stream-json", "--verbose",
     "--permission-mode", "dontAsk", "--allowedTools", ...SWEEP_TOOLS, "--strict-mcp-config",
     "--no-session-persistence", "--max-budget-usd", String(cfg.maxBudgetUsd)];
-  if (hasT3) args.push("--mcp-config", mcp!);
+  if (hasT3) args.push("--mcp-config", mcp);
   if (cfg.model) args.push("--model", cfg.model);
   let status = "error";
   let summary = "";

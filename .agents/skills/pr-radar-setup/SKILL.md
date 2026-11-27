@@ -1,6 +1,6 @@
 ---
 name: pr-radar-setup
-description: Set up a personal PR radar for anyone in the Runn-Fast GitHub org. It builds a reviewer profile from a year of their PRs and reviews, learns their working rhythm, installs the local app, and schedules Claude sweeps.
+description: Set up a personal PR radar for anyone in the Runn-Fast GitHub org. It builds a reviewer profile from a year of their PRs and reviews, learns their working rhythm, installs the local app, which also runs the Claude sweeps.
 disable-model-invocation: true
 ---
 
@@ -13,7 +13,7 @@ person and writes them to `users/<login>/`:
 - **profile**: `profile.json` and `profile.md`
 - **rhythm**: in `config.json`
 - **notifications**: in `config.json`
-- **schedule**: a launchd job for the app, plus T3 sweeps
+- **schedule**: a launchd job that serves the page, refreshes GitHub and starts the sweeps
 
 Run every command from the repo root. Confirm whose radar this is with
 `gh api user -q .login`. The app runs as whoever is logged in to `gh`, so
@@ -66,15 +66,12 @@ A short list beats a noisy one. `[]` turns them off.
 ## 4. Install and schedule
 
 1. Run `node radar.ts refresh --user <login> --full` once, then `node radar.ts board --user <login>`. Show them the review and team queues, and tune the weights until the lists look right.
-2. Run `./bin/install-launchd <login>`. It installs a LaunchAgent that keeps `node radar.ts serve` running at login, and prints the page URL. Its sandbox and permission needs are in the script's header. The person runs it in their own terminal if the agent can't.
-3. **T3 Code:** add the repo as a T3 project if it isn't one yet, and start a thread in it titled `pr-radar: sweeps for <login>`. From inside that thread, create one `schedule_task` per sweep time:
-   - `fixed_time` with `timeOfDay` in local time and `weekdays` (0 is Sunday)
-   - `bindToCurrentThread: true`, so the runs post into that thread and the person can ask for a sweep there at any time
-   - `freshSession: true`
-   - the prompt: "Run the pr-radar skill: a sweep for `<login>`. Don't ask questions; if something blocks the sweep, say what in your report and stop."
-
-   Time the sweeps about 15 minutes before each block starts, plus one mid-block in a long block, on workdays only. Record the times and task ids under `schedule` in `config.json`.
-4. **Without T3**, run sweeps by hand with "run a pr-radar sweep", or with `/loop` in a long-lived session.
+2. Run `./bin/install-launchd <login>`. It installs a LaunchAgent that keeps `node radar.ts serve --sweeps` running at login, and prints the page URL. Its sandbox and permission needs are in the script's header. The person runs it in their own terminal if the agent can't.
+3. **Sweeps.** Nothing to schedule. With `--sweeps`, the server starts a headless `claude -p` sweep after a refresh when something moved: one of their PRs or its thread, a new review request, or a new block of their day. The page's Sweep now button starts one too. Each run is logged under `users/<login>/logs/sweeps/`. The `claude` CLI must be installed and logged in. Run `node radar.ts sweep --user <login> --dry-run` to see whether a sweep would run now, and why.
+   - To change the defaults, add an optional `sweep` block to `config.json` with any of `enabled`, `minIntervalMinutes`, `maxPerDay`, `maxBudgetUsd` and `model`. The defaults are in `SWEEP_DEFAULTS` in `radar.ts`: on, at most every 30 minutes, 16 a day, $3 per run, and the CLI's default model.
+4. **T3 Connect.** In T3 Code, open Settings and use Copy MCP URL, then run `pbpaste | node radar.ts t3-mcp --user <login>`. It writes `users/<login>/t3-mcp.json`, which is gitignored. Headless sweeps use it to scan and read T3 threads, and the server uses it to park the PRs of threads they've snoozed in T3. Without it, sweeps skip the thread scan and work only from threads already linked.
+5. **The page in T3 Code.** Show them the README's "How I run it in T3" section: pin the pr-radar project, open the page in that project's browser panel, and keep one empty thread there for questions about what the page shows.
+6. **Without T3**, open the page in any browser. Sweeps still run from the server. They skip the thread scan, and the Open in T3 buttons need T3 Code. For an extra sweep, use Sweep now, or ask for "a pr-radar sweep" in any Claude Code session in this repo.
 
 ## 5. Commit
 
