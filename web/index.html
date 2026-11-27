@@ -76,6 +76,18 @@ details.parked summary { cursor: pointer; padding: 4px 0; }
 .ev .what { font-weight: 500; }
 .ev .on { color: var(--muted); overflow-wrap: anywhere; }
 .ev .on a { text-decoration: none; } .ev .on a:hover { text-decoration: underline; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; position: sticky; top: 0; z-index: 5; }
+.filters label { font-family: var(--f-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.filters select { font: inherit; font-size: 13px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); max-width: 100%; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; border-left: 1px solid var(--line); padding: 4px 10px; }
+.seg button:first-child { border-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.filters .reset { margin-left: auto; }
+.role { font-family: var(--f-mono); font-size: 11px; padding: 1px 7px; border-radius: 3px; white-space: nowrap; border: 1px solid currentColor; }
+.role.mine { color: var(--accent); }
+.role.reviewing { color: var(--ok); }
+.role.other { color: var(--muted); }
 footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
 @media (max-width: 560px) { .row { grid-template-columns: 1fr; } h1 { font-size: 24px; } }
 @media (prefers-reduced-motion: no-preference) { .row { transition: opacity .2s; } }
@@ -94,6 +106,19 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     <p class="headline" id="headline"></p>
   </header>
 
+  <div class="filters" role="group" aria-label="Filters">
+    <label for="repo-filter">Repo</label>
+    <select id="repo-filter"><option value="">All repositories</option></select>
+    <label>Role</label>
+    <div class="seg" id="role-filter">
+      <button type="button" data-role="" aria-pressed="true">All</button>
+      <button type="button" data-role="mine" aria-pressed="false">Authored by me</button>
+      <button type="button" data-role="review" aria-pressed="false">Reviewing</button>
+      <button type="button" data-role="team" aria-pressed="false">Team</button>
+    </div>
+    <button type="button" class="reset" id="reset-filters" hidden>Clear filters</button>
+  </div>
+
   <section id="feed-sec" hidden>
     <h2>Since you last looked <span class="count" id="feed-count"></span></h2>
     <div class="list feed" id="feed"></div>
@@ -104,21 +129,21 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     <div class="picks" id="picks"></div>
   </section>
 
-  <section>
+  <section id="mine-sec">
     <div><h2>Your pull requests <span class="count" id="mine-count"></span></h2>
     <p class="sub">What's left on each, from GitHub and the T3 threads working on it.</p></div>
     <div class="list" id="mine"></div>
     <details class="parked" id="mine-parked" hidden><summary></summary><div class="list"></div></details>
   </section>
 
-  <section>
-    <div><h2>Reviews you're best placed for <span class="count" id="review-count"></span></h2>
-    <p class="sub">Requested from you or your teams, or in the areas you know.</p></div>
+  <section id="review-sec">
+    <div><h2>Reviewing <span class="count" id="review-count"></span></h2>
+    <p class="sub">Other people's PRs: ones you've reviewed or been asked to, then the ones you're best placed for, from your teams and the areas you know.</p></div>
     <div class="list" id="review"></div>
     <details class="parked" id="review-parked" hidden><summary></summary><div class="list"></div></details>
   </section>
 
-  <section>
+  <section id="team-sec">
     <div><h2>Stalled near the finish <span class="count" id="team-count"></span></h2>
     <p class="sub">Other people's PRs that are green and close, but nobody has moved in a while.</p></div>
     <div class="list" id="team"></div>
@@ -135,6 +160,24 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
 (function () {
   const $ = (id) => document.getElementById(id);
   let board = null, viewedSent = false;
+  let filters = { repo: "", role: "" };
+  try { filters = Object.assign(filters, JSON.parse(localStorage.getItem("pr-radar-filters") || "{}")); } catch (e) {}
+  function saveFilters() { try { localStorage.setItem("pr-radar-filters", JSON.stringify(filters)); } catch (e) {} }
+  function roleOf(item) { return item.section; }
+  function passes(item) {
+    return (!filters.repo || item.repo === filters.repo) && (!filters.role || roleOf(item) === filters.role);
+  }
+  function roleChip(item) {
+    if (item.section === "mine") return ["mine", "authored by you"];
+    if (item.section === "review") {
+      const p = item.participation;
+      if (p === "requested") return ["reviewing", "review requested from you"];
+      if (p === "reviewed") return ["reviewing", "you've reviewed"];
+      if (p === "team") return ["reviewing", "requested from your team"];
+      return ["other", "suggested review"];
+    }
+    return ["other", "team PR"];
+  }
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -206,6 +249,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     main.append(el("div", "ref", shortRepo(item.repo) + " #" + item.number + (item.section !== "mine" ? " · " + item.author : "")));
     main.append(link(item.title, item.url, "title"));
     const meta = el("div", "meta");
+    const [rc, rt] = roleChip(item);
+    meta.append(el("span", "role " + rc, rt));
     chips(item).forEach(([c, t]) => meta.append(el("span", "chip " + c, t)));
     main.append(meta);
     const n = item.note;
@@ -250,7 +295,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
 
   function fill(section, items) {
     const box = $(section), parked = $(section + "-parked");
+    $(section + "-sec").hidden = !!filters.role && filters.role !== section;
     box.replaceChildren();
+    items = items.filter(passes);
     const live = items.filter((i) => !i.hidden), hid = items.filter((i) => i.hidden);
     $(section + "-count").textContent = live.length + (hid.length ? " · " + hid.length + " parked" : "");
     if (!live.length) box.append(el("div", "empty", section === "mine" ? "Nothing of yours needs a move." : "Nothing here right now."));
@@ -269,8 +316,31 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     hid.forEach((i) => pl.append(row(i, true)));
   }
 
-  function renderFeed() {
-    const evs = (board.events || []).slice(0, 15);
+  function renderFilters(all) {
+    const counts = {};
+    all.forEach((i) => { if (!i.hidden) counts[i.repo] = (counts[i.repo] || 0) + 1; });
+    if (filters.repo && !counts[filters.repo]) counts[filters.repo] = 0;
+    const sel = $("repo-filter");
+    sel.replaceChildren();
+    const allOpt = el("option", null, "All repositories (" + all.filter((i) => !i.hidden).length + ")");
+    allOpt.value = "";
+    sel.append(allOpt);
+    Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).forEach(([repo, n]) => {
+      const o = el("option", null, shortRepo(repo) + " (" + n + ")");
+      o.value = repo;
+      sel.append(o);
+    });
+    sel.value = filters.repo;
+    document.querySelectorAll("#role-filter button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.role === filters.role)));
+    $("reset-filters").hidden = !filters.repo && !filters.role;
+  }
+
+  function renderFeed(byKey) {
+    const evs = (board.events || []).filter((e) => {
+      if (filters.repo && !e.key.startsWith(filters.repo + "#")) return false;
+      if (filters.role) { const it = byKey[e.key]; return !!it && roleOf(it) === filters.role; }
+      return true;
+    }).slice(0, 15);
     $("feed-sec").hidden = !evs.length;
     const fresh = evs.filter((e) => e.new).length;
     $("feed-count").textContent = fresh ? fresh + " new" : "nothing new";
@@ -301,17 +371,21 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     $("mode").textContent = !rh ? "" : rh.mode === "off"
       ? (rh.next ? "for " + rh.next.day + " " + rh.next.from + " · " + rh.next.label : "outside working hours")
       : rh.label + " until " + rh.to;
-    renderFeed();
     const all = [].concat(board.mine, board.review, board.team);
     const byKey = Object.fromEntries(all.map((i) => [i.key, i]));
-    const picks = (board.picks || []).filter((p) => byKey[p.key] && !byKey[p.key].hidden);
+    renderFilters(all);
+    renderFeed(byKey);
+    const picks = (board.picks || []).filter((p) => byKey[p.key] && !byKey[p.key].hidden && passes(byKey[p.key]));
     $("picks-sec").hidden = !picks.length;
     const pk = $("picks");
     pk.replaceChildren();
     picks.forEach((p) => {
       const it = byKey[p.key];
       const c = el("div", "pick");
-      c.append(el("div", "ref", shortRepo(it.repo) + " #" + it.number));
+      const head = el("div", "meta");
+      const [rc, rt] = roleChip(it);
+      head.append(el("span", "ref", shortRepo(it.repo) + " #" + it.number), el("span", "role " + rc, rt));
+      c.append(head);
       c.append(link(it.title, it.url, "t"));
       if (p.why) c.append(el("div", "why", p.why));
       pk.append(c);
@@ -322,6 +396,12 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     const bots = Object.entries(board.botPRsByRepo || {});
     $("bots").textContent = bots.length ? "Bot PRs left out: " + bots.map(([r, n]) => shortRepo(r) + " " + n).join(", ") : "";
   }
+
+  $("repo-filter").onchange = (e) => { filters.repo = e.target.value; saveFilters(); render(); };
+  document.querySelectorAll("#role-filter button").forEach((b) => {
+    b.onclick = () => { filters.role = b.dataset.role; saveFilters(); render(); };
+  });
+  $("reset-filters").onclick = () => { filters = { repo: "", role: "" }; saveFilters(); render(); };
 
   $("refresh").onclick = async () => {
     $("refresh").disabled = true;

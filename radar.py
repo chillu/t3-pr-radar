@@ -618,9 +618,16 @@ def build_board(user):
         return out
 
     mine = sorted((flat(i, "mine", i["mine"]) for i in rows if "mine" in i), key=lambda x: -x["urgency"])
-    review = sorted((flat(i, "review", i["review"]) for i in rows
-                     if "review" in i and not i["draft"] and i["review"]["score"] >= profile.get("minReviewScore", 20)),
-                    key=lambda x: -x["score"])[: profile.get("maxReview", 10)]
+    candidates = sorted((flat(i, "review", i["review"]) for i in rows if "review" in i and not i["draft"]),
+                        key=lambda x: -x["score"])
+    top = [r for r in candidates if r["score"] >= profile.get("minReviewScore", 20)][: profile.get("maxReview", 10)]
+    top_keys = {r["key"] for r in top}
+    # PRs you're already part of stay on the list even when the score dropped them
+    involved = [r for r in candidates if r["key"] not in top_keys and (r["requestedMe"] or r["reviewedByMe"])]
+    review = top + involved
+    for r in review:
+        r["participation"] = ("requested" if r["requestedMe"] else "reviewed" if r["reviewedByMe"]
+                              else "team" if r["requestedTeams"] else "suggested")
     rkeys = {r["key"] for r in review}
     team = sorted((flat(i, "team", i["team"]) for i in rows
                    if i.get("team") and i["key"] not in rkeys), key=lambda x: -x["score"])[: profile.get("maxTeam", 8)]
@@ -666,7 +673,7 @@ def board_markdown(b):
         out += [f"Now: {rh.get('label')} ({rh.get('localTime')})", ""]
     if b["headline"]:
         out += [b["headline"], ""]
-    for sec, title in (("mine", "Your pull requests"), ("review", "Reviews you're best placed for"),
+    for sec, title in (("mine", "Your pull requests"), ("review", "Reviewing"),
                        ("team", "Stalled near the finish")):
         items = [i for i in b[sec] if not i["hidden"]]
         out += [f"## {title} ({len(items)})"] + ([line(i) for i in items] or ["- nothing right now"]) + [""]
