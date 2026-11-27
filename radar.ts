@@ -10,6 +10,9 @@
  *     choose the picks. Driven by the pr-radar skill; writes through the note/picks subcommands.
  *     The server starts one headless (`claude -p`) when sweepReason() says something moved.
  *
+ * T3 Code: the refresh links T3 threads to PRs and finds snoozed threads through T3's `t3` CLI, and
+ * reads T3's project list (for the badges) from T3's local database, since the CLI has no project list.
+ *
  * Everything lives in users/<login>/radar.db (SQLite, gitignored). profile.json holds the scoring
  * weights and config.json the rhythm, refresh cadence, sweeps and notifications.
  *
@@ -567,49 +570,42 @@ function projectColor(name: string): string {
 function slimProjects(list: Obj[]): Obj[] {
   return list.filter((p) => !p.deletedAt && !p.archivedAt).map((p) => {
     const r = p.repositoryIdentity ?? null;
-    return { title: p.title ?? "", owner: r?.owner ?? null, name: r?.name ?? null,
+    return { id: p.id ?? null, title: p.title ?? "", owner: r?.owner ?? null, name: r?.name ?? null,
       atRoot: !!r && p.workspaceRoot === r.rootPath, icon: p.projectIcon ?? null, createdAt: p.createdAt ?? "" };
   });
 }
 
 const storeProjects = (db: DatabaseSync, list: Obj[]): void => metaSet(db, "t3Projects", { at: iso(now()), projects: slimProjects(list) });
 
-/** The T3 Connect MCP URL that sweeps use, from the file `t3-mcp` writes. */
-function t3McpUrl(user: User): string | null {
-  const rel: string | null = sweepConfig(user.config).mcpConfig;
-  const file = rel ? path.join(ROOT, rel) : path.join(user.dir, "t3-mcp.json");
-  if (!fs.existsSync(file)) return null;
-  return loadJson<Obj>(file, {}).mcpServers?.t3?.url ?? null;
+/**
+ * T3 Code's CLI (T3_CLI, else ~/.t3/bin/t3). It talks to the running T3 app, so T3 must be open. It
+ * reserves a loopback port, so it fails inside a sandbox: the server calls it, and headless sweeps
+ * get what they need from the server instead.
+ */
+const t3Cli = (): string => process.env.T3_CLI ?? path.join(process.env.HOME ?? "", ".t3", "bin", "t3");
+
+async function t3Json(args: string[]): Promise<Obj> {
+  const r = await run(t3Cli(), [...args, "--json"]);
+  if (r.code) throw new Error(`t3 ${args.slice(0, 2).join(" ")}: ${r.stderr.trim().split("\n")[0] || `exit ${r.code}`}`);
+  return JSON.parse(r.stdout);
 }
 
-/** One tool call over MCP's streamable HTTP transport: initialize, then tools/call. */
-async function mcpCall(url: string, tool: string, args: Obj): Promise<Obj> {
-  let session: string | null = null;
-  let id = 0;
-  const post = async (method: string, params: Obj, notification = false): Promise<Obj | null> => {
-    const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
-    if (session) headers["Mcp-Session-Id"] = session;
-    if (method !== "initialize") headers["MCP-Protocol-Version"] = "2025-06-18";
-    const msg = notification ? { jsonrpc: "2.0", method, params } : { jsonrpc: "2.0", id: ++id, method, params };
-    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(msg), signal: AbortSignal.timeout(15_000) });
-    session = res.headers.get("mcp-session-id") ?? session;
-    if (!res.ok) throw new Error(`T3 MCP ${method}: HTTP ${res.status}`);
-    const text = await res.text();
-    if (notification) return null;
-    const replies: Obj[] = (res.headers.get("content-type") ?? "").includes("text/event-stream")
-      ? text.split("\n").filter((l) => l.startsWith("data:")).map((l) => JSON.parse(l.slice(5)))
-      : [JSON.parse(text)];
-    const reply = replies.find((r) => r.id === id);
-    if (!reply) throw new Error(`T3 MCP ${method}: no reply`);
-    if (reply.error) throw new Error(`T3 MCP ${method}: ${reply.error.message}`);
-    return reply.result;
-  };
-  await post("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "pr-radar", version: "1" } });
-  await post("notifications/initialized", {}, true);
-  const result = (await post("tools/call", { name: tool, arguments: args }))!;
-  const text: string | undefined = result.content?.find((c: Obj) => c.type === "text")?.text;
-  if (result.isError) throw new Error(`T3 MCP ${tool}: ${text ?? "failed"}`);
-  return result.structuredContent ?? JSON.parse(text ?? "{}");
+/** The threads of some T3 projects, top-level only, with the PRs T3 links to each (created or pushed to). */
+async function fetchT3Threads(projectIds: string[]): Promise<Obj[]> {
+  const lists = await Promise.all(projectIds.map((id) => t3Json(["thread", "list", "--project", id])));
+  return lists.flatMap((l: Obj) => (Array.isArray(l) ? l : l.threads ?? [])).filter((t: Obj) => !t.parentThreadId);
+}
+
+/** A thread's PRs on GitHub, as lowercase radar keys. */
+const threadPrKeys = (t: Obj): string[] => (t.pullRequests ?? [])
+  .filter((pr: Obj) => (pr.host ?? "github.com") === "github.com" && pr.repository && pr.number)
+  .map((pr: Obj) => `${pr.repository}#${pr.number}`.toLowerCase());
+
+/** The latest messages of a thread, trimmed for a sweep to read. */
+async function threadExcerpt(threadId: string, messages: number): Promise<Obj> {
+  const r = await t3Json(["thread", "show", threadId, "--messages", String(messages)]);
+  return { threadId, at: iso(now()), updatedAt: r.thread?.updatedAt ?? null, status: r.thread?.status ?? null,
+    messages: (r.messages ?? []).map((m: Obj) => ({ role: m.role, text: String(m.text ?? "").slice(0, 1500) })) };
 }
 
 /** T3 Code's local state database: T3_STATE_DB, else userdata/statev2.sqlite under T3CODE_HOME or ~/.t3. */
@@ -636,7 +632,7 @@ async function fetchT3Projects(): Promise<Obj[] | null> {
   const db = new DatabaseSync(file, { readOnly: true, timeout: 5_000 });
   let rows: Obj[];
   try {
-    rows = db.prepare(`select title, workspace_root, project_icon_json, created_at, archived_at
+    rows = db.prepare(`select project_id, title, workspace_root, project_icon_json, created_at, archived_at
                        from projection_projects where deleted_at is null`).all() as Obj[];
   } finally {
     db.close();
@@ -645,33 +641,9 @@ async function fetchT3Projects(): Promise<Obj[] | null> {
     const root = String(r.workspace_root).replace(/^~(?=\/|$)/, process.env.HOME ?? "~");
     let icon: Obj | null = null;
     try { icon = r.project_icon_json ? JSON.parse(r.project_icon_json) : null; } catch { /* not JSON */ }
-    return { title: r.title, workspaceRoot: root, repositoryIdentity: await gitHubRepo(root),
+    return { id: r.project_id, title: r.title, workspaceRoot: root, repositoryIdentity: await gitHubRepo(root),
       projectIcon: icon, createdAt: r.created_at, archivedAt: r.archived_at };
   }));
-}
-
-/**
- * T3 threads snoozed right now, with the PRs each one links, or null when there's no MCP URL.
- * Snoozing a thread in T3 parks its PRs here too, until the snooze ends or you unsnooze it.
- */
-async function fetchT3Snoozed(user: User): Promise<Obj[] | null> {
-  const url = t3McpUrl(user);
-  if (!url) return null;
-  const out: Obj[] = [];
-  let cursor: number | null = null;
-  for (let page = 0; page < 10; page++) {
-    const r: Obj = await mcpCall(url, "t3_thread_list",
-      { allProjects: true, snoozed: true, limit: 100, ...(cursor === null ? {} : { cursor }) });
-    for (const t of r.threads ?? []) {
-      const prs = (t.pullRequests ?? [])
-        .filter((pr: Obj) => (pr.host ?? "github.com") === "github.com" && pr.repository && pr.number)
-        .map((pr: Obj) => `${pr.repository}#${pr.number}`.toLowerCase());
-      if (t.snoozed && prs.length) out.push({ id: t.threadId, title: t.title ?? "", link: t.link ?? "", until: t.snoozedUntil ?? null, prs });
-    }
-    cursor = r.nextCursor ?? null;
-    if (cursor === null) break;
-  }
-  return out;
 }
 
 /**
@@ -714,8 +686,6 @@ async function refresh(user: User, sendNotifications = false, forceFull = false)
     const full = forceFull || !lastFull || now().getTime() - parse(lastFull)!.getTime() > FULL_EVERY_HOURS * HOUR;
     // T3's project list for the badges, alongside GitHub; a failure keeps the cached list
     const t3Projects = fetchT3Projects().catch((e: Error) => { console.error("T3 projects:", e.message); return null; });
-    // T3's snoozed threads, so their PRs park here too; a failure keeps the last list
-    const t3Snoozed = fetchT3Snoozed(user).catch((e: Error) => { console.error("T3 snoozed threads:", e.message); return null; });
     const { nodes: light, rate } = await searchAll(`org:${org} is:pr is:open archived:false`, LIGHT_FIELDS, 100);
     const t = iso(now());
     const ignore = new Set<string>(profile.ignoreRepos ?? []);
@@ -747,8 +717,28 @@ async function refresh(user: User, sendNotifications = false, forceFull = false)
     }
     const projects = await t3Projects;
     if (projects) storeProjects(db, projects);
-    const snoozed = await t3Snoozed;
-    if (snoozed) metaSet(db, "t3Snoozed", { at: iso(now()), threads: snoozed });
+    // T3's threads, through its CLI, for the projects that matter: those whose repo has an open PR
+    // here, and those with no GitHub repo (scratch projects), whose threads can still push to one.
+    const known: Obj[] = metaGet<Obj>(db, "t3Projects", null)?.projects ?? [];
+    const repos = new Set([...fps.keys()].map((k) => k.split("#")[0].toLowerCase()));
+    const projectIds = known.filter((p) => p.id && (!p.owner || repos.has(`${p.owner}/${p.name}`.toLowerCase()))).map((p) => p.id);
+    const threads = projectIds.length
+      ? await fetchT3Threads(projectIds).catch((e: Error) => { console.error("T3 threads:", e.message); return null; })
+      : null;
+    if (threads) {
+      // Link every thread to the PRs T3 says it created or pushed to (settled ones too: a settled thread
+      // on an open PR is still the one Open in T3 should open), and keep the snoozed ones, so their PRs
+      // park here as well until the snooze ends.
+      const snoozed: Obj[] = [];
+      transaction(db, () => {
+        for (const th of threads) {
+          const prs = threadPrKeys(th);
+          for (const key of prs) upsertThread(db, key, th.threadId, th.title ?? "", th.link ?? "", th.updatedAt ?? "", th.status ?? "");
+          if (th.snoozed && prs.length) snoozed.push({ id: th.threadId, title: th.title ?? "", link: th.link ?? "", until: th.snoozedUntil ?? null, prs });
+        }
+        metaSet(db, "t3Snoozed", { at: iso(now()), threads: snoozed });
+      });
+    }
     const firstRefresh = !metaGet(db, "lastRefresh");
     const newEvents: [string, string, string, string, Obj][] = [];
     transaction(db, () => {
@@ -844,7 +834,7 @@ function buildBoard(user: User): Obj {
     const threads = new Map<string, Obj[]>();
     const defaultEnv: string | undefined = config.t3?.environmentId;
     for (const r of all(db, "select * from threads order by updated_at desc")) {
-      const m = /t3-thread:\/\/v2\/([^/]+)\//.exec(r.link || "");
+      const m = /(?:t3-thread:\/\/v2|app\.t3\.codes\/threads)\/([^/]+)\//.exec(r.link || "");
       const env = m ? m[1] : defaultEnv;
       const list = threads.get(r.key) ?? [];
       list.push({ id: r.thread_id, title: r.title, link: r.link, updatedAt: r.updated_at, status: r.status,
@@ -951,10 +941,9 @@ function boardMarkdown(b: Obj): string {
 const SWEEP_TOOLS = [
   "Read", "Skill", "ToolSearch",
   "Bash(node radar.ts:*)", "Bash(gh pr view:*)", "Bash(gh api user:*)",
-  "mcp__t3__t3_thread_list", "mcp__t3__t3_thread_read", "mcp__t3__t3_thread_search",
 ];
 const SWEEP_DEFAULTS: Obj = { enabled: true, minIntervalMinutes: 30, maxPerDay: 16, maxBudgetUsd: 3.0,
-  keepLogDays: 7, timeoutMinutes: 20, mcpConfig: null, model: null };
+  keepLogDays: 7, timeoutMinutes: 20, model: null };
 const URGENT_KINDS = new Set(["review_requested", "team_requested", "ci_failed", "changes_requested", "comments", "conflict", "approved"]);
 
 const sweepConfig = (config: Obj): Obj => ({ ...SWEEP_DEFAULTS, ...(config.sweep ?? {}) });
@@ -989,15 +978,13 @@ function sweepReason(user: User, force = false): string | null {
   return null;
 }
 
-function sweepPrompt(user: User, reason: string, hasT3: boolean): string {
+function sweepPrompt(user: User, reason: string): string {
   return (
     `Run a pr-radar sweep for ${user.login}, following .agents/skills/pr-radar/SKILL.md exactly. ` +
     `This sweep was triggered because: ${reason}. ` +
     "This is a headless run started by radar.ts: nobody can answer questions, there is no T3 thread, " +
-    "and the page picks up your notes and picks on its own. " +
-    (hasT3
-      ? "T3's tools are available through the MCP server named t3 (tool names start with mcp__t3__); load them with ToolSearch. "
-      : "T3's tools are not available in this run: skip step 2 and work from the threads already linked. ") +
+    "and the page picks up your notes and picks on its own. There are no T3 tools in this run: the server " +
+    "already linked T3 threads to PRs, and `todo` carries the latest messages of each PR's newest thread. " +
     "End with the step 5 report and nothing else."
   );
 }
@@ -1013,6 +1000,19 @@ function pruneSweepLogs(user: User, keepDays: number): void {
 }
 
 /** Run one headless Claude sweep; log the transcript; record the outcome. Returns the sweeps row id. */
+/**
+ * The latest messages of the newest linked thread for each of your PRs that needs a note (what `todo`
+ * lists), kept in meta.threadExcerpts for `todo` to hand the sweep. Returns how many it fetched.
+ */
+async function prefetchThreadExcerpts(user: User): Promise<number> {
+  const board = buildBoard(user);
+  const want = board.mine.filter((pr: Obj) => (pr.note ?? {}).basis !== noteBasis(pr) && pr.threads.length);
+  const got = await Promise.all(want.map((pr: Obj) =>
+    threadExcerpt(pr.threads[0].id, pr.draft && pr.action.startsWith("Stale") ? 2 : 6).then((x) => [pr.key, x] as const)));
+  withDb(user, (db) => metaSet(db, "threadExcerpts", Object.fromEntries(got)));
+  return got.length;
+}
+
 async function runSweep(user: User, reason: string): Promise<number> {
   const cfg = sweepConfig(user.config);
   const logDir = path.join(user.dir, "logs", "sweeps");
@@ -1028,20 +1028,19 @@ async function runSweep(user: User, reason: string): Promise<number> {
     return Number(res.lastInsertRowid);
   });
 
-  // sweep.mcpConfig in config.json, else the file `t3-mcp` writes
-  const mcp: string = cfg.mcpConfig ? path.join(ROOT, cfg.mcpConfig) : path.join(user.dir, "t3-mcp.json");
-  const hasT3 = fs.existsSync(mcp);
-  const args = ["-p", sweepPrompt(user, reason, hasT3), "--output-format", "stream-json", "--verbose",
+  // The sweep can't run T3's CLI itself (it may be sandboxed), so fetch what it reads first.
+  const excerpts = await prefetchThreadExcerpts(user).catch((e: Error) => { console.error("T3 thread excerpts:", e.message); return 0; });
+  // --strict-mcp-config with no --mcp-config: no MCP servers at all, only the tools allowed here
+  const args = ["-p", sweepPrompt(user, reason), "--output-format", "stream-json", "--verbose",
     "--permission-mode", "dontAsk", "--allowedTools", ...SWEEP_TOOLS, "--strict-mcp-config",
     "--no-session-persistence", "--max-budget-usd", String(cfg.maxBudgetUsd)];
-  if (hasT3) args.push("--mcp-config", mcp);
   if (cfg.model) args.push("--model", cfg.model);
   let status = "error";
   let summary = "";
   let cost: number | null = null;
   let turns: number | null = null;
   try {
-    fs.writeFileSync(logPath, JSON.stringify({ type: "radar", reason, t3: hasT3, startedAt: iso(started) }) + "\n");
+    fs.writeFileSync(logPath, JSON.stringify({ type: "radar", reason, threadExcerpts: excerpts, startedAt: iso(started) }) + "\n");
     const fd = fs.openSync(logPath, "a");
     const outcome = await new Promise<{ code: number | null; timedOut: boolean }>((resolve, reject) => {
       const child = spawn("claude", args, { cwd: ROOT, stdio: ["ignore", fd, fd] });
@@ -1464,19 +1463,6 @@ const COMMANDS: Record<string, Command> = {
       setInterval(tick, 30_000);
     },
   },
-  "t3-mcp": {
-    help: "store T3 Connect's MCP URL from stdin for sweeps",
-    user: true,
-    run: (v) => {
-      const url = fs.readFileSync(0, "utf8").trim();
-      if (!/^https?:\/\//.test(url)) die("expected T3's MCP URL on stdin, e.g. `pbpaste | node radar.ts t3-mcp --user <login>`");
-      const user = userOf(v);
-      const file = path.join(user.dir, "t3-mcp.json");
-      fs.writeFileSync(file, JSON.stringify({ mcpServers: { t3: { type: "http", url } } }), { mode: 0o600 });
-      fs.chmodSync(file, 0o600);
-      console.log(`wrote ${path.relative(ROOT, file)}; sweeps will use T3's tools from the next run`);
-    },
-  },
   sweep: {
     help: "run a headless Claude sweep if one is due (see sweepReason)",
     user: true,
@@ -1496,12 +1482,21 @@ const COMMANDS: Record<string, Command> = {
   todo: {
     help: "own PRs whose PR or thread moved since their note",
     user: true,
-    run: (v) => {
-      const b = buildBoard(userOf(v));
-      const todo = b.mine.filter((pr: Obj) => (pr.note ?? {}).basis !== noteBasis(pr)).map((pr: Obj) => ({
-        key: pr.key, title: pr.title, action: pr.action, effort: pr.effort, flags: pr.flags, requested: pr.requested,
-        basis: noteBasis(pr), threads: pr.threads, recentEvents: pr.events,
-      }));
+    run: async (v) => {
+      const user = userOf(v);
+      // fresh excerpts when T3's CLI can run here; inside a sandbox it can't, so use the server's
+      await prefetchThreadExcerpts(user).catch(() => 0);
+      const b = buildBoard(user);
+      const excerpts: Obj = withDb(user, (db) => metaGet<Obj>(db, "threadExcerpts", {})) ?? {};
+      const todo = b.mine.filter((pr: Obj) => (pr.note ?? {}).basis !== noteBasis(pr)).map((pr: Obj) => {
+        const x = excerpts[pr.key];
+        return {
+          key: pr.key, title: pr.title, action: pr.action, effort: pr.effort, flags: pr.flags, requested: pr.requested,
+          basis: noteBasis(pr), threads: pr.threads, recentEvents: pr.events,
+          // the newest thread's last messages, fetched by the server before a sweep; null if there's none or it's stale
+          latestThread: x && x.threadId === pr.threads[0]?.id && x.updatedAt === pr.threads[0]?.updatedAt ? x : null,
+        };
+      });
       console.log(dump({ mine: todo }));
     },
   },
@@ -1562,43 +1557,6 @@ const COMMANDS: Record<string, Command> = {
     run: (v, [pr, tid]) => withDb(userOf(v), (db) =>
       upsertThread(db, pr, tid, str(v.title)!, str(v.link) ?? "", str(v["updated-at"])!, str(v.status) ?? "")),
   },
-  "ingest-threads": {
-    help: "record PR links from saved t3_thread_list results",
-    user: true,
-    positionals: ["files..."],
-    options: { floor: { type: "string", help: "ISO date: stop paging once threads are older than this" },
-      skip: { type: "string", help: "thread id to ignore (the one you're running in)" },
-      commit: { type: "boolean", help: "last page read: record the scan time" } },
-    run: (v, files) => withDb(userOf(v), (db) => {
-      const since = metaGet<string>(db, "lastThreadScan", "") || "";
-      let newest = since;
-      let oldest: string | null = null;
-      let linked = 0;
-      let nextCursor: unknown = null;
-      transaction(db, () => {
-        for (const file of files) {
-          const d = loadJson<Obj>(file, {});
-          nextCursor = d.nextCursor ?? null;
-          for (const t of d.threads ?? []) {
-            if (t.parentThreadId || t.threadId === str(v.skip)) continue;
-            const up: string = t.updatedAt ?? "";
-            if (up > newest) newest = up;
-            oldest = oldest === null || up < oldest ? up : oldest;
-            for (const pr of t.pullRequests ?? []) {
-              if ((pr.host ?? "github.com") !== "github.com") continue;
-              upsertThread(db, `${pr.repository}#${pr.number}`, t.threadId, t.title ?? "", t.link ?? "", up, t.status ?? "");
-              linked += 1;
-            }
-          }
-        }
-        if (v.commit) metaSet(db, "lastThreadScan", newest);
-      });
-      const floor = str(v.floor) || "";
-      const bar = since > floor ? since : floor;
-      console.log(dump({ linked, oldestThreadInPages: oldest, nextCursor,
-        keepPaging: !!nextCursor && ((oldest ?? "") as string) > bar, lastThreadScan: metaGet(db, "lastThreadScan") }));
-    }),
-  },
   "t3-projects": {
     help: "cache T3's project list (for the badges) from saved t3_project_list results",
     user: true,
@@ -1608,15 +1566,6 @@ const COMMANDS: Record<string, Command> = {
       if (!list.length) die("no projects in those files; save t3_project_list's JSON output and pass its path");
       storeProjects(db, list);
       console.log(dump({ projects: list.length }));
-    }),
-  },
-  "thread-scan": {
-    help: "get or set the last T3 thread scan time",
-    user: true,
-    options: { set: { type: "string" } },
-    run: (v) => withDb(userOf(v), (db) => {
-      if (str(v.set)) metaSet(db, "lastThreadScan", str(v.set));
-      console.log(metaGet(db, "lastThreadScan") || "never");
     }),
   },
   stats: {
