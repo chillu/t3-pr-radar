@@ -1,7 +1,15 @@
 # pr-radar
 
 A local to-do list built from open pull requests across the Runn-Fast org. It
-has three queues:
+does one thing: it surfaces the pull requests I should pay attention to, and
+in what order. It lives inside [T3 Code](https://github.com/pingdotgg/t3code),
+in the app's built-in browser.
+
+![pr-radar in T3 Code's built-in browser, next to T3's thread list](docs/screenshot.png)
+
+I've only just built this, so take it with a grain of salt.
+
+It has three queues:
 
 - your own PRs, with what's left on each, from GitHub and the T3 threads that worked on them
 - the reviews you're best placed for: requests to you or your teams, then your profile's areas and people
@@ -31,12 +39,24 @@ It's a bit of a hack to get this kind of view into T3 Code, but it works
 because the pieces fit together. The same approach should work anywhere that
 can show a local page next to an agent, such as Claude Desktop.
 
+### What it adds
+
+- **Claude judges each PR.** A sweep reads what moved on a PR, including its T3 threads, and writes down where it stands and the next step. It then picks what needs me most.
+- **Deep work or quick wins.** The order follows the time of day: big reviews and real fixes in my deep-work block, merges, nudges and small reviews in the quick-win block.
+- **A profile from my history.** The `pr-radar-setup` skill builds a reviewer profile from a year of PRs I authored and reviewed, then tunes it with me. It covers the areas I know, the people I review and the teams whose requests count.
+- **Keyboard shortcuts.** `j` and `k` move between PRs, `Enter` opens the PR in T3, `s` snoozes, `e` settles, and `?` lists the rest. The missing piece is focus: keys only work once the built-in browser has focus, so click the page or press F6 first.
+
 ### Why it's this small
 
 One file does the work with tools that are already on the machine: `gh` for
 fetching, the `claude` CLI for sweeps, and Node for serving. The page is a
 static file. The only reason it needs a server at all is the SQLite
 connection.
+
+- `web/index.html` is one static page with no dependencies.
+- `radar.ts` is a single TypeScript file of about 1,600 lines. It talks to `gh` and `claude` and keeps its state in a small SQLite database.
+- It reaches T3 through `t3code://` links and the `t3` CLI.
+- T3 Code does everything else: projects and threads, file browsing, diffs, side conversations, agent orchestration, and a thousand other things I don't want to maintain.
 
 ## Two cadences
 
