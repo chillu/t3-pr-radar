@@ -61,6 +61,13 @@ shell variables don't carry between calls. The `--user <login>` flag selects
 
 5. **Report.** End your turn with the headline, the picks, and anything new, in five lines or fewer. Name every PR as a link. When the user asked for the sweep in a chat, also answer whatever else they asked.
 
+6. **Settle the thread.** A scheduled sweep stays out of the way: the page is where the user reads the radar, not the thread. After a scheduled run, call `t3_thread_organize` with `action: "settle"` and no `threadId`, which settles this thread at the end of the turn. Leave it active only when something new needs the user before their next look at the page:
+   - a review requested from them
+   - a failure on one of their PRs: CI, a conflict, or changes requested
+   - a new question waiting on their answer
+
+   When the user asked for the sweep themselves in the thread, don't settle it; they're reading.
+
 A sweep where nothing moved is a few calls: `todo` comes back empty, so only re-pick if the block has changed since the last sweep's picks.
 
 ## Tuning
