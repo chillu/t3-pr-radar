@@ -62,7 +62,7 @@ node radar.ts refresh --user <login> --full   # first fill
 node radar.ts serve --user <login> --sweeps   # or ./bin/install-launchd <login>
 node radar.ts sweep --user <login> --dry-run  # would a sweep run now, and why?
 pbpaste | node radar.ts t3-mcp --user <login> # let sweeps read T3 threads (T3 → Settings → Copy MCP URL)
-node radar.ts t3-projects --user <login> projects.json  # seed the badges from saved t3_project_list output
+node radar.ts t3-projects --user <login> projects.json  # load the badges from saved t3_project_list output, when T3 isn't on this machine
 ```
 
 To type-check after a change (TypeScript and Node's types stay out of `package.json`):
@@ -79,7 +79,7 @@ npx -y -p typescript tsc --noEmit
 - **No per-PR watches.** T3's `watch_pull_request` starts an agent turn on every event, which suits one PR you're actively babysitting, not a hundred. The light poll replaces it here.
 - **Rhythm.** Every item is tagged `deep` or `quick` (a review counts as deep at 300+ lines or 15+ files). Sweeps pick for your current block: deep work in the morning, quick wins in the afternoon, or whatever your config says.
 - **Into T3 Code.** Each row links its T3 threads with `t3code://threads/<environmentId>/<threadId>`, and offers "New T3 thread" as `t3code://new?pr=<url>&prompt=<text>`. T3 opens that link as a draft, and nothing runs until you press Send. T3's built-in browser asks before following any app link, so the page hands these links to the server (`POST /api/open`, same origin only), which opens them with macOS `open`. If that fails, the click falls back to the plain link and its prompt. Both routes come from T3's `packages/shared/src/promptLinks.ts`. T3 also has its own `/pull-requests` view (with `involvement=authored|reviewing`), but it has no app link, and it doesn't know your profile or rhythm.
-- **Project badges match T3.** Each refresh fetches T3's project list through the same MCP URL and caches it. A PR's repo maps to the T3 project with that `repositoryIdentity` (the one opened at the repo root wins), and the badge uses the project's icon or T3's own monogram rule (`projectMonogram` and `projectColor` in `radar.ts`, decompiled from the app). Repos with no T3 project get the monogram of their name.
+- **Project badges match T3.** Each refresh reads T3's projects, read-only, from T3's own database (`~/.t3/userdata/statev2.sqlite`, table `projection_projects`) and caches them. T3 has no CLI or API for this that works without an agent, so this leans on an internal table a T3 update could change; if the read fails, the cached list stays. T3 doesn't store a project's repo, so like T3, radar.ts asks git for each project folder's `origin` remote and top level. A PR's repo maps to the T3 project with that repo (the one opened at the repo root wins), and the badge uses the project's icon or T3's own monogram rule (`projectMonogram` and `projectColor` in `radar.ts`, decompiled from the app). Repos with no T3 project get the monogram of their name.
 - **T3 snoozes count here too.** Each refresh asks T3 Connect for snoozed threads (`t3_thread_list` with `snoozed`), and a PR linked to one moves to "Settled and snoozed" until the snooze ends or you unsnooze the thread in T3. It's one-way: snoozing in pr-radar doesn't snooze the thread. It needs the MCP URL from `node radar.ts t3-mcp`.
 - **Read-only toward GitHub.** Nothing here comments, reviews, approves or merges.
 

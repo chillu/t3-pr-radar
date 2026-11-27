@@ -612,19 +612,42 @@ async function mcpCall(url: string, tool: string, args: Obj): Promise<Obj> {
   return result.structuredContent ?? JSON.parse(text ?? "{}");
 }
 
-/** T3's projects through T3 Connect, or null when there's no MCP URL. */
-async function fetchT3Projects(user: User): Promise<Obj[] | null> {
-  const url = t3McpUrl(user);
-  if (!url) return null;
-  const out: Obj[] = [];
-  let cursor: number | null = null;
-  for (let page = 0; page < 10; page++) {
-    const r: Obj = await mcpCall(url, "t3_project_list", { limit: 200, ...(cursor === null ? {} : { cursor }) });
-    out.push(...(r.projects ?? []));
-    cursor = r.nextCursor ?? null;
-    if (cursor === null) break;
+/** T3 Code's local state database: T3_STATE_DB, else userdata/statev2.sqlite under T3CODE_HOME or ~/.t3. */
+const t3StateDb = (): string => process.env.T3_STATE_DB ??
+  path.join(process.env.T3CODE_HOME ?? path.join(process.env.HOME ?? "", ".t3"), "userdata", "statev2.sqlite");
+
+/** The GitHub repo a folder belongs to, the way T3 finds it: the origin remote and the repo's top level. */
+async function gitHubRepo(dir: string): Promise<Obj | null> {
+  const top = await run("git", ["-C", dir, "rev-parse", "--show-toplevel"]);
+  if (top.code) return null;
+  const remote = await run("git", ["-C", dir, "remote", "get-url", "origin"]);
+  const m = /github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(remote.stdout.trim());
+  return m ? { owner: m[1], name: m[2], rootPath: top.stdout.trim() } : null;
+}
+
+/**
+ * T3's projects, read-only from T3's own database, in t3_project_list's shape. T3 has no CLI or API
+ * for this that works without an agent, so this reads its internal table (projection_projects), which
+ * a T3 update could change. On any failure the refresh keeps the cached list.
+ */
+async function fetchT3Projects(): Promise<Obj[] | null> {
+  const file = t3StateDb();
+  if (!fs.existsSync(file)) return null;
+  const db = new DatabaseSync(file, { readOnly: true, timeout: 5_000 });
+  let rows: Obj[];
+  try {
+    rows = db.prepare(`select title, workspace_root, project_icon_json, created_at, archived_at
+                       from projection_projects where deleted_at is null`).all() as Obj[];
+  } finally {
+    db.close();
   }
-  return out;
+  return Promise.all(rows.map(async (r) => {
+    const root = String(r.workspace_root).replace(/^~(?=\/|$)/, process.env.HOME ?? "~");
+    let icon: Obj | null = null;
+    try { icon = r.project_icon_json ? JSON.parse(r.project_icon_json) : null; } catch { /* not JSON */ }
+    return { title: r.title, workspaceRoot: root, repositoryIdentity: await gitHubRepo(root),
+      projectIcon: icon, createdAt: r.created_at, archivedAt: r.archived_at };
+  }));
 }
 
 /**
@@ -684,7 +707,7 @@ async function refresh(user: User, sendNotifications = false, forceFull = false)
     const lastFull = metaGet<string>(db, "lastFullRefresh");
     const full = forceFull || !lastFull || now().getTime() - parse(lastFull)!.getTime() > FULL_EVERY_HOURS * HOUR;
     // T3's project list for the badges, alongside GitHub; a failure keeps the cached list
-    const t3Projects = fetchT3Projects(user).catch((e: Error) => { console.error("T3 projects:", e.message); return null; });
+    const t3Projects = fetchT3Projects().catch((e: Error) => { console.error("T3 projects:", e.message); return null; });
     // T3's snoozed threads, so their PRs park here too; a failure keeps the last list
     const t3Snoozed = fetchT3Snoozed(user).catch((e: Error) => { console.error("T3 snoozed threads:", e.message); return null; });
     const { nodes: light, rate } = await searchAll(`org:${org} is:pr is:open archived:false`, LIGHT_FIELDS, 100);
