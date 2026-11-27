@@ -109,6 +109,15 @@ h2 .hint { font-weight: 400; font-size: 13px; color: var(--muted); }
 #snooze-menu[hidden] { display: none; }
 #snooze-menu button { border: 0; background: transparent; text-align: left; font-size: 13px; padding: 5px 10px; border-radius: 6px; }
 #snooze-menu button:hover { background: var(--hover); }
+/* A quick tooltip for [data-tip] elements (the repo badges), instead of the slow native title */
+.badge[data-tip] { cursor: default; }
+#tip { position: fixed; z-index: 20; pointer-events: none; padding: 5px 8px; border-radius: 6px; font-size: 12px; line-height: 1.4;
+  background: var(--pressed); color: var(--text); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  white-space: nowrap; opacity: 0; transform: translateY(2px); transition: opacity .08s, transform .08s; }
+#tip.on { opacity: 1; transform: none; }
+#tip .repo { font-family: var(--f-mono); font-weight: 600; }
+#tip .sub { color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { #tip { transition: none; transform: none; } }
 footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 2px; }
 
 @media (max-width: 720px) {
@@ -145,6 +154,7 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
     <span>Settle hides a PR until it changes again: a push, a review or a comment. Settled and snoozed PRs stay one click away, in the sidebar.</span>
   </footer>
 </div>
+<div id="tip" role="tooltip"></div>
 <div id="snooze-menu" role="menu" hidden>
   <button type="button" role="menuitem" data-days="1">Until tomorrow</button>
   <button type="button" role="menuitem" data-days="3">For 3 days</button>
@@ -306,7 +316,9 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
   function badge(repo) {
     const p = (board.projects || {})[repo] || {};
     const b = el("span", "badge");
-    b.title = repo + (p.project && p.project !== repo.split("/")[1] ? " (T3 project " + p.project + ")" : "");
+    b.dataset.tip = repo;
+    b.dataset.tipSub = p.project ? (p.project !== repo.split("/")[1] ? "T3 project: " + p.project : "") : "No T3 project";
+    b.setAttribute("aria-label", repo);
     const icon = p.icon;
     if (icon && icon.kind === "lucide" && /^[a-z0-9-]+$/.test(icon.name || "")) {
       b.style.setProperty("--c", "var(" + colorVar(icon.color || p.color) + ")");
@@ -319,6 +331,28 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
     }
     return b;
   }
+  // One floating tooltip for every [data-tip], shown at once on hover, above the element
+  // (below when there's no room). Fixed position, so the tables' overflow can't clip it.
+  const tip = $("tip");
+  let tipFor = null;
+  function showTip(t) {
+    tipFor = t;
+    tip.replaceChildren(el("div", "repo", t.dataset.tip));
+    if (t.dataset.tipSub) tip.append(el("div", "sub", t.dataset.tipSub));
+    const r = t.getBoundingClientRect();
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    const top = r.top - h - 6 >= 4 ? r.top - h - 6 : r.bottom + 6;
+    tip.style.top = top + "px";
+    tip.style.left = Math.min(Math.max(4, r.left + r.width / 2 - w / 2), innerWidth - w - 4) + "px";
+    tip.classList.add("on");
+  }
+  function hideTip() { tipFor = null; tip.classList.remove("on"); }
+  document.addEventListener("mouseover", (ev) => {
+    const t = ev.target instanceof Element ? ev.target.closest("[data-tip]") : null;
+    if (t && t !== tipFor) showTip(t); else if (!t && tipFor) hideTip();
+  });
+  addEventListener("scroll", hideTip, { passive: true });
+  document.documentElement.addEventListener("mouseleave", hideTip);
   function avatar(login) {
     const img = el("img", "av");
     img.src = "/avatar/" + encodeURIComponent(login);
@@ -492,6 +526,7 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
 
   function render() {
     if (!board) return;
+    hideTip(); // the rows it pointed at are about to be replaced
     renderStatus();
     const buckets = Object.fromEntries(GROUPS.map((g) => [g.id, []]));
     const parked = [];
