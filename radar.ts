@@ -685,7 +685,13 @@ function repoBadge(repo: string, projects: Obj[]): Obj {
     .filter((x) => x.owner?.toLowerCase() === owner && x.name?.toLowerCase() === name)
     .sort((a, b) => Number(b.atRoot) - Number(a.atRoot) || String(a.createdAt).localeCompare(String(b.createdAt)))[0];
   const label: string = p?.title || repo.split("/")[1] || repo;
-  return { project: p?.title ?? null, monogram: projectMonogram(label), color: projectColor(label), icon: p?.icon ?? null };
+  // A project's icon setting can override the letters and colour: {kind: "monogram", text, color},
+  // or {kind: "lucide", name, color}, whose colour also tints the letters if the icon can't load.
+  const icon: Obj | null = p?.icon ?? null;
+  const text = typeof icon?.text === "string" && icon.text.trim() ? Array.from(icon.text.trim()).slice(0, 2).join("") : null;
+  const color = MONOGRAM_PALETTE.includes(icon?.color) ? icon!.color : projectColor(label);
+  return { project: p?.title ?? null, monogram: text ?? projectMonogram(label), color,
+    icon: icon?.kind === "lucide" ? icon : null };
 }
 
 // ---------------------------------------------------------------- refresh
