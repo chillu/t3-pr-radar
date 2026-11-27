@@ -118,6 +118,28 @@ h2 .hint { font-weight: 400; font-size: 13px; color: var(--muted); }
 #tip .repo { font-family: var(--f-mono); font-weight: 600; }
 #tip .sub { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { #tip { transition: none; transform: none; } }
+/* Keyboard: the selected row, the filter box, the undo toast and the key sheet */
+.row.sel { background: var(--hover); box-shadow: inset 2px 0 0 var(--t3); }
+#filterbar { display: flex; gap: 10px; align-items: center; }
+#filterbar[hidden] { display: none; }
+#filter { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text); background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 10px; outline: none; }
+#filter:focus { border-color: var(--t3); }
+#filterbar .hint { font-size: 12px; color: var(--faint); white-space: nowrap; }
+kbd { font-family: var(--f-mono); font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 4px; padding: 0 4px; background: var(--card); }
+#snooze-menu kbd { margin-right: 8px; }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 30; padding: 7px 12px; border-radius: 8px;
+  font-size: 13px; background: var(--pressed); color: var(--text); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+#toast[hidden] { display: none; }
+#keys { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.5); padding: 16px; }
+#keys[hidden] { display: none; }
+#keys .sheet { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; max-width: 520px; width: 100%;
+  box-shadow: 0 16px 48px rgba(0,0,0,.5); }
+#keys h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+#keys dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
+#keys dt { white-space: nowrap; } #keys dd { margin: 0; color: var(--muted); }
+#keys p { margin: 12px 0 0; font-size: 12px; color: var(--faint); }
 footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 2px; }
 
 @media (max-width: 720px) {
@@ -146,19 +168,51 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
         <button type="button" data-order="deep">Deep first</button>
       </div>
     </nav>
-    <main id="main" aria-live="polite"></main>
+    <main id="main">
+      <div id="filterbar" hidden>
+        <input id="filter" type="search" placeholder="Filter by title, repo, author or #number" aria-label="Filter PRs" autocomplete="off" spellcheck="false">
+        <span class="hint"><kbd>Enter</kbd> keep · <kbd>Esc</kbd> clear</span>
+      </div>
+      <div id="groups" aria-live="polite" style="display: contents"></div>
+    </main>
   </div>
 
   <footer>
+    <span><kbd>j</kbd>/<kbd>k</kbd> move · <kbd>J</kbd>/<kbd>K</kbd> group · <kbd>1</kbd>–<kbd>9</kbd> groups · <kbd>Enter</kbd> open in T3 ·
+      <kbd>s</kbd> snooze · <kbd>e</kbd> settle · <kbd>/</kbd> filter · <kbd>?</kbd> all keys</span>
     <span>Open in T3 opens the PR's thread, or starts a draft thread when there isn't one. The asterisk is lit when a thread exists.</span>
     <span>Settle hides a PR until it changes again: a push, a review or a comment. Settled and snoozed PRs stay one click away, in the sidebar.</span>
   </footer>
 </div>
 <div id="tip" role="tooltip"></div>
 <div id="snooze-menu" role="menu" hidden>
-  <button type="button" role="menuitem" data-days="1">Until tomorrow</button>
-  <button type="button" role="menuitem" data-days="3">For 3 days</button>
-  <button type="button" role="menuitem" data-days="7">For a week</button>
+  <button type="button" role="menuitem" data-days="1"><kbd>1</kbd>Until tomorrow</button>
+  <button type="button" role="menuitem" data-days="3"><kbd>3</kbd>For 3 days</button>
+  <button type="button" role="menuitem" data-days="7"><kbd>7</kbd>For a week</button>
+</div>
+<div id="toast" role="status" hidden></div>
+<div id="keys" role="dialog" aria-modal="true" aria-labelledby="keys-h" hidden>
+  <div class="sheet">
+    <h3 id="keys-h">Keyboard shortcuts</h3>
+    <dl>
+      <dt><kbd>j</kbd> <kbd>k</kbd> or <kbd>↓</kbd> <kbd>↑</kbd></dt><dd>Next or previous PR</dd>
+      <dt><kbd>J</kbd> <kbd>K</kbd> or <kbd>]</kbd> <kbd>[</kbd></dt><dd>Next or previous group</dd>
+      <dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></dt><dd>Fix, Review, Chase</dd>
+      <dt><kbd>4</kbd> <kbd>5</kbd></dt><dd>Decide: finish or close, Drafts in progress</dd>
+      <dt><kbd>6</kbd> <kbd>7</kbd> <kbd>8</kbd></dt><dd>Your PRs with reviewers, Reviews with authors, Team PRs</dd>
+      <dt><kbd>9</kbd> <kbd>0</kbd></dt><dd>Settled and snoozed, back to Your move</dd>
+      <dt><kbd>Enter</kbd></dt><dd>Open in T3: the PR's thread, or a new draft thread</dd>
+      <dt><kbd>o</kbd></dt><dd>Open on GitHub</dd>
+      <dt><kbd>s</kbd></dt><dd>Snooze, then <kbd>1</kbd> <kbd>3</kbd> or <kbd>7</kbd> days</dd>
+      <dt><kbd>e</kbd></dt><dd>Settle: hide until the PR changes</dd>
+      <dt><kbd>u</kbd></dt><dd>Bring back (in Settled and snoozed)</dd>
+      <dt><kbd>z</kbd></dt><dd>Undo the last settle or snooze</dd>
+      <dt><kbd>q</kbd></dt><dd>Switch between Quick first and Deep first</dd>
+      <dt><kbd>/</kbd></dt><dd>Filter; <kbd>Enter</kbd> keeps it, <kbd>Esc</kbd> clears it</dd>
+      <dt><kbd>?</kbd></dt><dd>This list</dd>
+    </dl>
+    <p>Keys work once the page has focus: click it, or press F6 until it does. F6 or ⌘L takes you back to T3, and keys with ⌘, ⌃ or ⌥ always stay T3's.</p>
+  </div>
 </div>
 
 <script>
@@ -375,8 +429,29 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
     catch (e) { $("err").textContent = "Can't reach the radar server. Is it running?"; }
   }
   async function triage(i, action, days) {
-    try { board = await api("/api/triage", { key: i.key, action, days }); render(); }
-    catch (e) { $("err").textContent = "Couldn't save that: " + e.message; }
+    try { board = await api("/api/triage", { key: i.key, action, days }); render(); return true; }
+    catch (e) { $("err").textContent = "Couldn't save that: " + e.message; return false; }
+  }
+  // Settle or snooze, with a short "z to undo" notice.
+  let lastAction = null, toastTimer = null;
+  function toast(text) {
+    const t = $("toast");
+    t.textContent = text;
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 6000);
+  }
+  async function act(i, action, days) {
+    if (!(await triage(i, action, days))) return;
+    lastAction = i;
+    toast((action === "done" ? "Settled" : "Snoozed") + " #" + i.number + " · press z to undo");
+  }
+  async function undo() {
+    const i = lastAction;
+    if (!i) return;
+    lastAction = null;
+    selKey = i.key; // the row comes back selected
+    if (await triage(i, "clear")) toast("Brought back #" + i.number);
   }
 
   // ---- snooze menu
@@ -393,7 +468,7 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
   function closeMenu() { menu.hidden = true; menuItem = null; }
   menu.addEventListener("click", (ev) => {
     const b = ev.target.closest("button[data-days]");
-    if (b && menuItem) triage(menuItem, "snooze", Number(b.dataset.days));
+    if (b && menuItem) act(menuItem, "snooze", Number(b.dataset.days));
     closeMenu();
   });
   document.addEventListener("click", (ev) => { if (!menu.hidden && !menu.contains(ev.target) && !ev.target.closest(".snooze")) closeMenu(); });
@@ -402,6 +477,8 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
   // ---- rows
   function row(i, g) {
     const r = el("div", "row");
+    r.dataset.key = i.key;
+    r.dataset.group = g;
     const left = el("div");
     const l1 = el("div", "l1");
     const t = el("a", "title", i.title);
@@ -431,7 +508,7 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
       const tr = i.triage || {};
       acts.append(el("span", "pnote", tr.action === "snooze" ? "Snoozed until " + untilText(tr.until)
         : "Settled " + (minsAgo(tr.at) || "") + ", back when it changes"));
-      const b = el("button", "sbtn", "Bring back");
+      const b = el("button", "sbtn bring", "Bring back");
       b.type = "button";
       b.onclick = () => triage(i, "clear");
       acts.append(t3Button(i), b);
@@ -440,10 +517,10 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
       s.type = "button"; s.title = "Snooze"; s.setAttribute("aria-label", "Snooze"); s.setAttribute("aria-haspopup", "menu");
       s.append(svg("clock", 15));
       s.onclick = (ev) => { ev.stopPropagation(); menu.hidden || menuItem !== i ? openMenu(s, i) : closeMenu(); };
-      const c = el("button", "ibtn");
+      const c = el("button", "ibtn settle");
       c.type = "button"; c.title = "Settle: hide until the PR changes"; c.setAttribute("aria-label", "Settle");
       c.append(svg("check", 15));
-      c.onclick = () => triage(i, "done");
+      c.onclick = () => act(i, "done");
       acts.append(t3Button(i), s, c);
     }
     r.append(left, age, acts);
@@ -540,20 +617,127 @@ footer { font-size: 12px; color: var(--faint); display: flex; flex-direction: co
     [].concat(board.mine, board.review, board.team).forEach((i) => (i.hidden ? parked : buckets[groupOf(i)]).push(i));
     for (const k in buckets) buckets[k] = sorted(buckets[k]);
     renderNav(buckets, parked);
-    const main = $("main");
+    const main = $("groups");
     main.replaceChildren();
-    if (view === "parked") main.append(section(PARKED, parked, "Nothing settled or snoozed."));
+    if (filterText) {
+      // a filter searches every group, settled and snoozed included
+      const hit = (i) => [i.title, i.repo, i.author, "#" + i.number].join(" ").toLowerCase().includes(filterText);
+      let any = false;
+      GROUPS.concat([PARKED]).forEach((g) => {
+        const items = (g === PARKED ? parked : buckets[g.id]).filter(hit);
+        if (items.length) { any = true; main.append(section(g, items)); }
+      });
+      if (!any) main.append(el("div", "empty", "Nothing matches “" + filterText + "”."));
+    } else if (view === "parked") main.append(section(PARKED, parked, "Nothing settled or snoozed."));
     else if (view !== "move") main.append(section(GROUPS.find((g) => g.id === view), buckets[view]));
     else {
       const move = GROUPS.filter((g) => g.nav === "move");
       if (move.every((g) => !buckets[g.id].length)) main.append(el("div", "empty", "Nothing needs a move from you. The sidebar has what's waiting on others."));
       move.forEach((g) => { if (buckets[g.id].length) main.append(section(g, buckets[g.id])); });
     }
+    byKey = Object.fromEntries([].concat(board.mine, board.review, board.team).map((i) => [i.key, i]));
+    rows = [...main.querySelectorAll(".row")];
+    applySel(false);
   }
 
-  document.querySelectorAll(".seg button").forEach((b) => {
-    b.onclick = () => { order = b.dataset.order; store.set("pr-radar-order", order); render(); };
+  // ---- keyboard: j/k rows, J/K groups, digits for groups, single-letter actions on the selected row.
+  // T3's built-in browser hands the page every key except a few ⌘/⌃ ones (F6, ⌘B, ⌘L, ⌘R and editing),
+  // so plain keys never clash with T3. Keys with ⌘, ⌃ or ⌥ are left alone.
+  let selKey = null, selIdx = 0, rows = [], byKey = {}, filterText = "";
+  function applySel(scroll) {
+    if (!rows.length) { selKey = null; return; }
+    let n = selKey ? rows.findIndex((r) => r.dataset.key === selKey) : -1;
+    if (n < 0) n = Math.min(selIdx, rows.length - 1); // the selected PR left (settled, snoozed): take the next one
+    rows.forEach((r, k) => { r.classList.toggle("sel", k === n); if (k === n) r.setAttribute("aria-current", "true"); else r.removeAttribute("aria-current"); });
+    selIdx = n;
+    selKey = rows[n].dataset.key;
+    if (scroll) rows[n].scrollIntoView({ block: "nearest" });
+  }
+  function select(n) {
+    if (!rows.length) return;
+    selIdx = Math.max(0, Math.min(n, rows.length - 1));
+    selKey = rows[selIdx].dataset.key;
+    applySel(true);
+  }
+  function selectGroup(dir) {
+    const g = rows[selIdx] && rows[selIdx].dataset.group;
+    const first = rows.findIndex((r) => r.dataset.group === g);
+    if (dir > 0) {
+      const n = rows.findIndex((r, k) => k > selIdx && r.dataset.group !== g);
+      if (n >= 0) select(n);
+    } else if (selIdx > first) select(first); // mid-group: back to its first row
+    else if (first > 0) select(rows.findIndex((r) => r.dataset.group === rows[first - 1].dataset.group));
+  }
+  const DIGITS = { "9": "parked", "0": "move" };
+  GROUPS.forEach((g, k) => { DIGITS[String(k + 1)] = g.id; });
+  function goGroup(id) {
+    if (filterText) clearFilter();
+    const g = GROUPS.find((x) => x.id === id);
+    if (id === "move" || id === "parked") setView(id);
+    else if (g.nav === "move") setView("move", id);
+    else setView(id);
+    const n = rows.findIndex((r) => r.dataset.group === id);
+    select(n >= 0 ? n : 0);
+  }
+  function setOrder(o) { order = o; store.set("pr-radar-order", order); render(); }
+  function openFilter() { $("filterbar").hidden = false; $("filter").focus(); $("filter").select(); }
+  function clearFilter() {
+    filterText = "";
+    $("filter").value = "";
+    $("filterbar").hidden = true;
+    $("filter").blur();
+    render();
+  }
+  $("filter").addEventListener("input", (ev) => { filterText = ev.target.value.trim().toLowerCase(); selKey = null; selIdx = 0; render(); });
+  $("filter").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); $("filter").blur(); if (!filterText) $("filterbar").hidden = true; }
+    else if (ev.key === "Escape") { ev.preventDefault(); clearFilter(); }
+    else if (ev.key === "ArrowDown") { ev.preventDefault(); $("filter").blur(); select(0); }
   });
+  $("groups").addEventListener("click", (ev) => {
+    const r = ev.target instanceof Element ? ev.target.closest(".row") : null;
+    if (r) { selIdx = rows.indexOf(r); selKey = r.dataset.key; applySel(false); }
+  });
+  $("keys").addEventListener("click", (ev) => { if (ev.target === $("keys")) $("keys").hidden = true; });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.isComposing) return; // ⌘/⌃/⌥ combos stay T3's and the browser's
+    const t = ev.target instanceof Element ? ev.target : null;
+    if (t && t.closest("input, textarea, select, [contenteditable]")) return;
+    const k = ev.key;
+    if (!$("keys").hidden) { if (k === "Escape" || k === "?") { ev.preventDefault(); $("keys").hidden = true; } return; }
+    if (!menu.hidden) {
+      const btns = [...menu.querySelectorAll("button")], n = btns.indexOf(document.activeElement);
+      if (k === "1" || k === "3" || k === "7") { ev.preventDefault(); menu.querySelector('[data-days="' + k + '"]').click(); }
+      else if (k === "ArrowDown" || k === "j") { ev.preventDefault(); btns[(n + 1) % btns.length].focus(); }
+      else if (k === "ArrowUp" || k === "k") { ev.preventDefault(); btns[(n - 1 + btns.length) % btns.length].focus(); }
+      return; // Enter clicks the focused item; Escape closes the menu
+    }
+    if ((k === "Enter" || k === " ") && t && t.closest("button, a")) return; // let a focused button or link do its own thing
+    const r = rows[selIdx], i = r ? byKey[r.dataset.key] : null;
+    let handled = true;
+    switch (k) {
+      case "j": case "ArrowDown": select(selIdx + 1); break;
+      case "k": case "ArrowUp": select(selIdx - 1); break;
+      case "J": case "]": selectGroup(1); break;
+      case "K": case "[": selectGroup(-1); break;
+      case "Enter": if (r) r.querySelector(".t3btn").click(); break;
+      case "o": if (r) r.querySelector(".title").click(); break;
+      case "s": { const b = r && r.querySelector(".snooze"); if (b) { b.scrollIntoView({ block: "nearest" }); b.click(); } break; }
+      case "e": if (r && r.querySelector(".settle")) act(i, "done"); break;
+      case "u": if (r && r.querySelector(".bring")) triage(i, "clear"); break;
+      case "z": undo(); break;
+      case "q": setOrder(order === "quick" ? "deep" : "quick"); break;
+      case "/": openFilter(); break;
+      case "?": $("keys").hidden = false; break;
+      case "Escape": if (filterText) clearFilter(); else handled = false; break;
+      default:
+        if (DIGITS[k]) goGroup(DIGITS[k]);
+        else handled = false;
+    }
+    if (handled) ev.preventDefault();
+  });
+
+  document.querySelectorAll(".seg button").forEach((b) => { b.onclick = () => setOrder(b.dataset.order); });
   $("sweep").onclick = async () => {
     $("sweep").disabled = true;
     $("sweep").textContent = "Sweeping…";
