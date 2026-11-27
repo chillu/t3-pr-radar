@@ -1,0 +1,51 @@
+#!/bin/sh
+# Install a LaunchAgent that keeps the pr-radar server running for one user.
+#   ./bin/install-launchd <login>      install or reinstall
+#   ./bin/install-launchd <login> -u   uninstall
+# Writes ~/Library/LaunchAgents/com.runn.pr-radar.<login>.plist and loads it with launchctl.
+# Needs to run outside an agent sandbox (it writes to ~/Library and talks to launchd).
+set -eu
+login="${1:?usage: install-launchd <login> [-u]}"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+label="com.runn.pr-radar.$login"
+plist="$HOME/Library/LaunchAgents/$label.plist"
+domain="gui/$(id -u)"
+
+launchctl bootout "$domain/$label" 2>/dev/null || true
+if [ "${2:-}" = "-u" ]; then
+  rm -f "$plist"
+  echo "uninstalled $label"
+  exit 0
+fi
+
+[ -d "$root/users/$login" ] || { echo "no users/$login; run pr-radar-setup first" >&2; exit 1; }
+mkdir -p "$root/users/$login/logs" "$HOME/Library/LaunchAgents"
+python="$(command -v python3)"
+gh_dir="$(dirname "$(command -v gh)")"
+port="$(python3 -c "import json;print(json.load(open('$root/users/$login/config.json')).get('port',7424))")"
+
+cat > "$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$label</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$python</string><string>$root/radar.py</string>
+    <string>serve</string><string>--user</string><string>$login</string><string>--notify</string>
+  </array>
+  <key>WorkingDirectory</key><string>$root</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>$gh_dir:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>$root/users/$login/logs/serve.log</string>
+  <key>StandardErrorPath</key><string>$root/users/$login/logs/serve.log</string>
+</dict>
+</plist>
+EOF
+
+launchctl bootstrap "$domain" "$plist"
+echo "installed $label: http://127.0.0.1:$port (logs in users/$login/logs/serve.log)"
