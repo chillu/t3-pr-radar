@@ -14,7 +14,7 @@ It has three queues:
 
 The local server refreshes GitHub data every few minutes without a model.
 Each refresh records events such as "CI passed" or "review requested from
-you". A **sweep** adds the **judgement** on top, which the server can't do:
+you". A **sweep** adds the **judgement** on top, which the server can't do. The server starts one headless (`claude -p`, logged under `users/<login>/logs/sweeps/`) when something moved. The user can also ask for one in any T3 thread, or with Sweep now on the page. A sweep produces:
 
 - a note per PR, with the next step and anything waiting on the user
 - up to three picks for the user's current block of the day
@@ -61,7 +61,7 @@ shell variables don't carry between calls. The `--user <login>` flag selects
 
 5. **Report.** End your turn with the headline, the picks, and anything new, in five lines or fewer. Name every PR as a link. When the user asked for the sweep in a chat, also answer whatever else they asked.
 
-6. **Settle the thread.** A scheduled sweep stays out of the way: the page is where the user reads the radar, not the thread. After a scheduled run, call `t3_thread_organize` with `action: "settle"` and no `threadId`, which settles this thread at the end of the turn. Leave it active only when something new needs the user before their next look at the page:
+6. **Settle the thread.** Only when you're running in a T3 thread; skip this step in a headless run started by `radar.py`. A sweep stays out of the way: the page is where the user reads the radar, not the thread. After a scheduled run, call `t3_thread_organize` with `action: "settle"` and no `threadId`, which settles this thread at the end of the turn. Leave it active only when something new needs the user before their next look at the page:
    - a review requested from them
    - a failure on one of their PRs: CI, a conflict, or changes requested
    - a new question waiting on their answer

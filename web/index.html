@@ -91,6 +91,15 @@ details.parked summary { cursor: pointer; padding: 4px 0; }
 .role.mine { color: var(--accent); }
 .role.reviewing { color: var(--ok); }
 .role.other { color: var(--muted); }
+.sw { padding: 10px 16px; border-top: 1px solid var(--line); display: grid; gap: 4px; font-size: 13px; }
+.sw:first-child { border-top: 0; }
+.sw .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.sw .head time { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+.sw .st { font-family: var(--f-mono); font-size: 11px; }
+.sw .st.ok { color: var(--ok); } .sw .st.error { color: var(--bad); } .sw .st.running { color: var(--warn); }
+.sw details summary { cursor: pointer; color: var(--muted); }
+.sw pre { white-space: pre-wrap; font-family: var(--f-body); margin: 6px 0 0; max-width: 75ch; }
+.sw .log { font-family: var(--f-mono); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
 footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
 @media (max-width: 560px) { .row { grid-template-columns: 1fr; } h1 { font-size: 24px; } }
 @media (prefers-reduced-motion: no-preference) { .row { transition: opacity .2s; } }
@@ -103,6 +112,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
       <span id="who"></span>
       <span id="fresh">Loading…</span>
       <button id="refresh" class="primary" type="button">Refresh</button>
+      <button id="sweep" type="button" title="Ask Claude to re-read what moved and redo the notes and picks">Sweep now</button>
       <span id="err" class="err"></span>
     </div>
     <h1>What needs you next</h1>
@@ -151,6 +161,12 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     <p class="sub">Other people's PRs that are green and close, but nobody has moved in a while.</p></div>
     <div class="list" id="team"></div>
     <details class="parked" id="team-parked" hidden><summary></summary><div class="list"></div></details>
+  </section>
+
+  <section id="sweeps-sec" hidden>
+    <div><h2>Sweeps <span class="count" id="sweeps-count"></span></h2>
+    <p class="sub">Claude runs a sweep when something moved: one of your PRs or its thread, a new review request, or a new block of your day. Full transcripts are kept for a week.</p></div>
+    <div class="list" id="sweeps"></div>
   </section>
 
   <footer>
@@ -391,6 +407,35 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     });
   }
 
+  function renderSweeps() {
+    const sw = board.sweeps || [];
+    $("sweeps-sec").hidden = !sw.length && !board.sweepsEnabled;
+    const running = sw.some((s) => s.status === "running");
+    $("sweep").disabled = running || !board.sweepsEnabled;
+    $("sweep").textContent = running ? "Sweeping…" : "Sweep now";
+    const cost = sw.reduce((a, s) => a + (s.cost_usd || 0), 0);
+    $("sweeps-count").textContent = sw.length ? sw.length + " recent · $" + cost.toFixed(2) : "none yet";
+    const box = $("sweeps");
+    box.replaceChildren();
+    if (!sw.length) box.append(el("div", "empty", "No sweeps yet. The first one runs when something moves, or press Sweep now."));
+    sw.forEach((s) => {
+      const r = el("div", "sw");
+      const head = el("div", "head");
+      head.append(el("time", null, ago(s.started_at)), el("span", "st " + s.status, s.status),
+        el("span", null, s.reason || ""));
+      if (s.cost_usd != null) head.append(el("span", "chip", "$" + s.cost_usd.toFixed(2) + " · " + (s.turns || 0) + " turns"));
+      r.append(head);
+      if (s.summary) {
+        const d = el("details");
+        if (s.status === "error") d.open = true;
+        d.append(el("summary", null, s.status === "error" ? "What went wrong" : "Report"), el("pre", null, s.summary));
+        r.append(d);
+      }
+      if (s.log_path) r.append(el("div", "log", "Log: " + s.log_path));
+      box.append(r);
+    });
+  }
+
   function render() {
     if (!board) return;
     $("who").textContent = board.org + " · " + board.login;
@@ -424,6 +469,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     fill("mine", board.mine);
     fill("review", board.review);
     fill("team", board.team);
+    renderSweeps();
     const bots = Object.entries(board.botPRsByRepo || {});
     $("bots").textContent = bots.length ? "Bot PRs left out: " + bots.map(([r, n]) => shortRepo(r) + " " + n).join(", ") : "";
   }
@@ -433,6 +479,13 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
     b.onclick = () => { filters.role = b.dataset.role; saveFilters(); render(); };
   });
   $("reset-filters").onclick = () => { filters = { repo: "", role: "" }; saveFilters(); render(); };
+
+  $("sweep").onclick = async () => {
+    $("sweep").disabled = true;
+    $("sweep").textContent = "Sweeping…";
+    try { await api("/api/sweep", {}); } catch (e) { $("err").textContent = e.message; }
+    setTimeout(load, 1500);
+  };
 
   $("refresh").onclick = async () => {
     $("refresh").disabled = true;

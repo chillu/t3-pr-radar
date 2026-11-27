@@ -15,7 +15,7 @@ Nothing is hosted.
 | | What | How often | Cost |
 |---|---|---|---|
 | **Refresh** | Poll every open PR's fingerprint (head, CI, review decision, mergeable, updated). Fetch details only for PRs that changed. Rescore, diff, and record events like "CI passed" or "review requested from you". Optionally notify. | Every 5 min in working hours and every 60 min outside them. Also on the page's Refresh button. | About 2 GraphQL points when nothing changed, with a full fetch (about 110 points) every 6 hours. No model. |
-| **Sweep** | Claude reads T3 threads and review comments for PRs that moved, writes a note per PR, and picks up to three things for your current block of the day. | Scheduled T3 runs before and during each block, or on request in the pr-radar thread. | One model session. It's short when little moved. |
+| **Sweep** | Claude reads T3 threads and review comments for PRs that moved, writes a note per PR, and picks up to three things for your current block of the day. | Started by the server when something moved (one of your PRs or its thread, a new review request, a new block of your day), at most every 30 minutes. Also on the page's Sweep now button. | A headless `claude -p` run with an allow-list of tools and a budget cap. A quiet sweep costs about $0.30. Transcripts go to `users/<login>/logs/sweeps/` for 7 days. |
 
 ## Layout
 
@@ -30,12 +30,15 @@ Nothing is hosted.
 
 ```sh
 python3 radar.py refresh --user <login> --full   # first fill
-python3 radar.py serve --user <login>            # or ./bin/install-launchd <login>
+python3 radar.py serve --user <login> --sweeps   # or ./bin/install-launchd <login>
+python3 radar.py sweep --user <login> --dry-run  # would a sweep run now, and why?
+pbpaste | python3 radar.py t3-mcp --user <login> # let sweeps read T3 threads (T3 → Settings → Copy MCP URL)
 ```
 
 ## Design notes
 
 - **Fetching is a script; judgement is Claude.** The server never calls a model. A sweep only reads what moved: own PRs whose PR or T3 thread changed since their note.
+- **Sweeps run outside T3.** The server decides when Claude is worth calling, so a quiet day costs nothing. T3 is used for what it's good at: deep links, the built-in browser, and its thread data, which reaches the headless sweeps through T3 Connect's MCP URL.
 - **No per-PR watches.** T3's `watch_pull_request` starts an agent turn on every event, which suits one PR you're actively babysitting, not a hundred. The light poll replaces it here.
 - **Rhythm.** Every item is tagged `deep` or `quick` (a review counts as deep at 300+ lines or 15+ files). Sweeps pick for your current block: deep work in the morning, quick wins in the afternoon, or whatever your config says.
 - **Into T3 Code.** Each row links its T3 threads with `t3code://threads/<environmentId>/<threadId>`, and offers "New T3 thread" as `t3code://new?pr=<url>&prompt=<text>`. T3 opens that link as a draft, and nothing runs until you press Send. Both routes come from T3's `packages/shared/src/promptLinks.ts`. T3 also has its own `/pull-requests` view (with `involvement=authored|reviewing`), but it has no app link, and it doesn't know your profile or rhythm.

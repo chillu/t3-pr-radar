@@ -2,3 +2,4 @@
 __pycache__/
 users/*/radar.db*
 users/*/logs/
+users/*/t3-mcp.json

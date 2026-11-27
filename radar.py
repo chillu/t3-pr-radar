@@ -86,6 +86,11 @@ create table if not exists triage (
   key text primary key, action text not null, until text, at text not null
 );
 create table if not exists meta (k text primary key, v text);
+create table if not exists sweeps (
+  id integer primary key autoincrement,
+  started_at text not null, finished_at text, reason text, status text,  -- running | ok | error
+  summary text, cost_usd real, turns integer, log_path text
+);
 """
 
 
@@ -654,6 +659,7 @@ def build_board(user):
         "totals": {"open": len(rows), "mine": len(mine)},
         "botPRsByRepo": meta_get(con, "botPRsByRepo", {}),
         "events": events, "lastViewed": last_seen,
+        "sweeps": [dict(r) for r in con.execute("select * from sweeps order by id desc limit 8")],
         "mine": mine, "review": review, "team": team,
     }
     con.close()
@@ -778,6 +784,183 @@ def cmd_thread_scan(a):
 
 # ---------------------------------------------------------------- server
 
+
+# ---------------------------------------------------------------- sweeps (Claude, headless)
+
+SWEEP_TOOLS = [
+    "Read", "Skill", "ToolSearch",
+    "Bash(python3 radar.py:*)", "Bash(gh pr view:*)", "Bash(gh api user:*)",
+    "mcp__t3__t3_thread_list", "mcp__t3__t3_thread_read", "mcp__t3__t3_thread_search",
+]
+SWEEP_DEFAULTS = {"enabled": True, "minIntervalMinutes": 30, "maxPerDay": 16, "maxBudgetUsd": 3.0,
+                  "keepLogDays": 7, "timeoutMinutes": 20, "mcpConfig": None, "model": None}
+URGENT_KINDS = {"review_requested", "team_requested", "ci_failed", "changes_requested", "comments",
+                "conflict", "approved"}
+
+
+def sweep_config(config):
+    return {**SWEEP_DEFAULTS, **config.get("sweep", {})}
+
+
+def own_prs_needing_notes(board):
+    out = []
+    for pr in board["mine"]:
+        basis = pr["updatedAt"] + "|" + ",".join(sorted(t["updatedAt"] or "" for t in pr["threads"]))
+        if (pr["note"] or {}).get("basis") != basis:
+            out.append(pr["key"])
+    return out
+
+
+def sweep_reason(user, force=False):
+    """Why a sweep should run now, or None. Cheap: reads only the database."""
+    cfg = sweep_config(user.config)
+    con = user.db()
+    last = con.execute("select * from sweeps where status != 'running' order by id desc limit 1").fetchone()
+    running = con.execute("select 1 from sweeps where status='running' and started_at > ?",
+                          (iso(now() - dt.timedelta(minutes=cfg["timeoutMinutes"] + 5)),)).fetchone()
+    today = con.execute("select count(*) from sweeps where started_at > ?",
+                        (iso(now() - dt.timedelta(hours=24)),)).fetchone()[0]
+    since = last["started_at"] if last else ""
+    urgent = [r["text"] for r in con.execute("select text, kind from events where at > ?", (since,))
+              if r["kind"] in URGENT_KINDS]
+    last_block = meta_get(con, "lastSweepBlock")
+    con.close()
+    if running:
+        return None
+    if force:
+        return "asked for from the page"
+    if not cfg["enabled"] or today >= cfg["maxPerDay"]:
+        return None
+    rh = rhythm_now(user.config)
+    if rh and rh["mode"] == "off":
+        return None
+    if last and (now() - parse(last["started_at"])).total_seconds() < 60 * cfg["minIntervalMinutes"]:
+        return None
+    if not last:
+        return "first sweep"
+    block = rh["label"] if rh else None
+    if block and block != last_block:
+        return f"now in {block}"
+    if urgent:
+        return "new: " + "; ".join(dict.fromkeys(urgent))[:200]
+    moved = own_prs_needing_notes(build_board(user))
+    if moved:
+        return f"{len(moved)} of your PRs moved"
+    return None
+
+
+def sweep_prompt(user, reason, has_t3):
+    return (
+        f"Run a pr-radar sweep for {user.login}, following .agents/skills/pr-radar/SKILL.md exactly. "
+        f"This sweep was triggered because: {reason}. "
+        "This is a headless run started by radar.py: nobody can answer questions, there is no T3 thread to "
+        "settle (skip step 6), and the page picks up your notes and picks on its own. "
+        + ("T3's tools are available through the MCP server named t3 (tool names start with mcp__t3__); load them "
+           "with ToolSearch. " if has_t3 else
+           "T3's tools are not available in this run: skip step 2 and work from the threads already linked. ")
+        + "End with the step 5 report and nothing else."
+    )
+
+
+def prune_sweep_logs(user, keep_days):
+    d = os.path.join(user.dir, "logs", "sweeps")
+    if not os.path.isdir(d):
+        return
+    cutoff = time.time() - keep_days * 86400
+    for f in os.listdir(d):
+        path = os.path.join(d, f)
+        if os.path.getmtime(path) < cutoff:
+            os.remove(path)
+
+
+def run_sweep(user, reason):
+    """Run one headless Claude sweep; log the transcript; record the outcome. Returns the sweeps row id."""
+    cfg = sweep_config(user.config)
+    log_dir = os.path.join(user.dir, "logs", "sweeps")
+    os.makedirs(log_dir, exist_ok=True)
+    started = now()
+    log_path = os.path.join(log_dir, started.strftime("%Y%m%d-%H%M%S") + ".jsonl")
+    con = user.db()
+    rh = rhythm_now(user.config)
+    cur = con.execute("insert into sweeps(started_at, reason, status, log_path) values(?,?,?,?)",
+                      (iso(started), reason, "running", os.path.relpath(log_path, ROOT)))
+    sweep_id = cur.lastrowid
+    meta_set(con, "lastSweepBlock", rh["label"] if rh else None)
+    con.commit()
+    con.close()
+
+    mcp = cfg["mcpConfig"] and os.path.join(ROOT, cfg["mcpConfig"])
+    has_t3 = bool(mcp and os.path.exists(mcp))
+    cmd = ["claude", "-p", sweep_prompt(user, reason, has_t3), "--output-format", "stream-json", "--verbose",
+           "--permission-mode", "dontAsk", "--allowedTools", *SWEEP_TOOLS, "--strict-mcp-config",
+           "--no-session-persistence", "--max-budget-usd", str(cfg["maxBudgetUsd"])]
+    if has_t3:
+        cmd += ["--mcp-config", mcp]
+    if cfg["model"]:
+        cmd += ["--model", cfg["model"]]
+    status, summary, cost, turns = "error", "", None, None
+    try:
+        with open(log_path, "w") as log:
+            log.write(json.dumps({"type": "radar", "reason": reason, "t3": has_t3, "startedAt": iso(started)}) + "\n")
+            log.flush()
+            proc = subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, text=True,
+                                  timeout=60 * cfg["timeoutMinutes"])
+        result = None
+        with open(log_path) as log:
+            for line in log:
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                if msg.get("type") == "result":
+                    result = msg
+        if result:
+            status = "error" if result.get("is_error") or proc.returncode else "ok"
+            summary = (result.get("result") or result.get("subtype") or "")[:4000]
+            cost, turns = result.get("total_cost_usd"), result.get("num_turns")
+        else:
+            summary = f"claude exited with code {proc.returncode} and no result; see the log"
+    except subprocess.TimeoutExpired:
+        summary = f"timed out after {cfg['timeoutMinutes']} minutes"
+    except Exception as e:
+        summary = f"could not run claude: {e}"
+    con = user.db()
+    con.execute("update sweeps set finished_at=?, status=?, summary=?, cost_usd=?, turns=? where id=?",
+                (iso(now()), status, summary, cost, turns, sweep_id))
+    con.execute("delete from sweeps where started_at < ?", (iso(now() - dt.timedelta(days=cfg["keepLogDays"])),))
+    con.commit()
+    fails = [r["status"] for r in con.execute("select status from sweeps order by id desc limit 2")]
+    con.close()
+    prune_sweep_logs(user, cfg["keepLogDays"])
+    if fails == ["error", "error"]:
+        notify("pr-radar: sweeps are failing", summary[:120])
+    return sweep_id
+
+
+def cmd_t3_mcp(a):
+    """Store T3 Connect's MCP URL (read from stdin) as the sweep's MCP config, readable only by you."""
+    url = sys.stdin.read().strip()
+    if not url.startswith(("http://", "https://")):
+        sys.exit("expected T3's MCP URL on stdin, e.g. `pbpaste | python3 radar.py t3-mcp --user <login>`")
+    user = User(a.user)
+    path = os.path.join(user.dir, "t3-mcp.json")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({"mcpServers": {"t3": {"type": "http", "url": url}}}, f)
+    print(f"wrote {os.path.relpath(path, ROOT)}; sweeps will use T3's tools from the next run")
+
+
+def cmd_sweep(a):
+    user = User(a.user)
+    reason = sweep_reason(user, force=a.force)
+    if a.dry_run or not reason:
+        print(json.dumps({"wouldRun": bool(reason), "reason": reason}))
+        return
+    sid = run_sweep(user, reason)
+    con = user.db()
+    print(json.dumps(dict(con.execute("select * from sweeps where id=?", (sid,)).fetchone()), indent=2))
+
+
 def refresh_minutes(config):
     r = config.get("refresh", {})
     rh = rhythm_now(config)
@@ -786,12 +969,32 @@ def refresh_minutes(config):
 
 
 class Server:
-    def __init__(self, user, notify_on):
+    def __init__(self, user, notify_on, sweeps_on=False):
         self.user = user
         self.notify_on = notify_on
+        self.sweeps_on = sweeps_on
         self.lock = threading.Lock()
         self.refreshing = False
         self.last_error = None
+        self.sweep_lock = threading.Lock()
+
+    def start_sweep(self, force=False):
+        """Run a sweep in its own thread if one is due (or forced). Returns the reason, or None."""
+        if not self.sweep_lock.acquire(blocking=False):
+            return None
+        reason = sweep_reason(self.user, force=force)
+        if not reason:
+            self.sweep_lock.release()
+            return None
+
+        def go():
+            try:
+                run_sweep(self.user, reason)
+            finally:
+                self.sweep_lock.release()
+
+        threading.Thread(target=go, daemon=True).start()
+        return reason
 
     def do_refresh(self, background=False):
         if not self.lock.acquire(blocking=not background):
@@ -816,6 +1019,8 @@ class Server:
             due = (not last) or (now() - parse(last)).total_seconds() >= 60 * refresh_minutes(self.user.config)
             if due:
                 self.do_refresh(background=True)
+                if self.sweeps_on:
+                    self.start_sweep()
             time.sleep(30)
 
     def handler(self):
@@ -837,6 +1042,7 @@ class Server:
             def board(self):
                 b = build_board(srv.user)
                 b["refreshing"], b["error"] = srv.refreshing, srv.last_error
+                b["sweepsEnabled"] = srv.sweeps_on
                 return b
 
             def do_GET(self):
@@ -869,6 +1075,10 @@ class Server:
                     con.commit()
                     con.close()
                     return self.send(200, self.board())
+                if self.path == "/api/sweep":
+                    reason = srv.start_sweep(force=True)
+                    return self.send(200 if reason else 409,
+                                     {"started": bool(reason), "error": None if reason else "a sweep is already running"})
                 if self.path == "/api/viewed":
                     con = srv.user.db()
                     meta_set(con, "lastViewed", iso(now()))
@@ -883,7 +1093,7 @@ class Server:
 def cmd_serve(a):
     user = User(a.user)
     port = a.port or user.config.get("port", 7424)
-    srv = Server(user, notify_on=a.notify)
+    srv = Server(user, notify_on=a.notify, sweeps_on=a.sweeps)
     threading.Thread(target=srv.loop, daemon=True).start()
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", port), srv.handler())
     print(f"pr-radar for {user.login} on http://127.0.0.1:{port}", flush=True)
@@ -969,6 +1179,11 @@ def main():
     sp = cmd("serve", cmd_serve, "serve the page on 127.0.0.1 and refresh in the background")
     sp.add_argument("--port", type=int)
     sp.add_argument("--notify", action="store_true")
+    sp.add_argument("--sweeps", action="store_true", help="also run Claude sweeps when the gate says one is due")
+    cmd("t3-mcp", cmd_t3_mcp, "store T3 Connect's MCP URL from stdin for sweeps")
+    sp = cmd("sweep", cmd_sweep, "run a headless Claude sweep if one is due (see sweep_reason)")
+    sp.add_argument("--force", action="store_true", help="run even if the gate says no")
+    sp.add_argument("--dry-run", action="store_true", help="only print whether a sweep would run, and why")
     cmd("todo", cmd_todo, "own PRs whose PR or thread moved since their note")
     sp = cmd("note", cmd_note, "record the judgement for one PR")
     sp.add_argument("pr", help="Owner/repo#123")
