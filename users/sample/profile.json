@@ -1,0 +1,61 @@
+{
+  "login": "sample-dev",
+  "org": "example-org",
+  "builtFrom": "a made-up example: authored 380 and reviewed 520 PRs over a year (radar.ts stats)",
+  "teams": ["platform-team", "frontend-guild"],
+  "areas": [
+    {
+      "name": "design system and UI components",
+      "weight": 3,
+      "paths": ["packages/ui/*", "*/components/*", "*.stories.tsx", "*tokens*"],
+      "keywords": ["ui", "component", "design system", "storybook", "a11y", "accessibility"]
+    },
+    {
+      "name": "frontend build and tooling",
+      "weight": 2.5,
+      "paths": ["vite.config.*", "*/vite.config.*", "tsconfig*.json", "*/tsconfig*.json", ".eslintrc*", "package.json", "*/package.json"],
+      "keywords": ["build", "vite", "eslint", "typescript", "bundle"]
+    },
+    {
+      "name": "CI and preview deploys",
+      "weight": 2,
+      "paths": [".github/*", "*deploy*", "*preview*"],
+      "keywords": ["ci:", "ci(", "deploy", "preview", "workflow"]
+    },
+    {
+      "name": "performance",
+      "weight": 2,
+      "paths": ["*perf*", "*lighthouse*", "*web-vitals*"],
+      "keywords": ["perf", "performance", "lcp", "bundle size", "lazy"]
+    },
+    {
+      "name": "GraphQL API",
+      "weight": 1.5,
+      "paths": ["apps/api/*", "*.graphql", "*/schema/*"],
+      "keywords": ["graphql", "api", "schema", "resolver"]
+    },
+    {
+      "name": "dependency upgrades",
+      "weight": 1,
+      "paths": [".nvmrc", ".tool-versions", "pnpm-lock.yaml"],
+      "keywords": ["upgrade", "bump", "react 1", "node 2"]
+    }
+  ],
+  "repos": {
+    "example-org/web-app": 1.0,
+    "example-org/ui-kit": 0.9,
+    "example-org/api": 0.6,
+    "example-org/marketing-site": 0.4,
+    "example-org/infra": 0.3
+  },
+  "people": {
+    "teammate-a": 1.0,
+    "teammate-b": 0.8,
+    "teammate-c": 0.5,
+    "teammate-d": 0.3
+  },
+  "ignoreRepos": ["example-org/sandbox"],
+  "minReviewScore": 20,
+  "maxReview": 10,
+  "maxTeam": 8
+}

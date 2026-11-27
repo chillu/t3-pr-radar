@@ -1,0 +1,48 @@
+{
+  "login": "sample-dev",
+  "t3": {
+    "enabled": true
+  },
+  "rhythm": {
+    "timezone": "Europe/Berlin",
+    "workdays": [1, 2, 3, 4, 5],
+    "blocks": [
+      {
+        "mode": "quick",
+        "label": "Morning: quick wins",
+        "from": "09:00",
+        "to": "11:00",
+        "prefer": "warming up: merges, small reviews, nudges, answering short threads"
+      },
+      {
+        "mode": "deep",
+        "label": "Midday: deep work",
+        "from": "11:00",
+        "to": "15:30",
+        "prefer": "big reviews in your areas first, then your own PRs that need real work"
+      },
+      {
+        "mode": "quick",
+        "label": "Late afternoon: wrap up",
+        "from": "15:30",
+        "to": "17:30",
+        "prefer": "get things over the line before you log off, and close stale drafts"
+      }
+    ],
+    "inferredFrom": "a made-up example: commit peaks at 10:00 and 16:00, plus what they said"
+  },
+  "port": 7424,
+  "refresh": {
+    "workingMinutes": 5,
+    "offHoursMinutes": 60
+  },
+  "notify": {
+    "kinds": ["review_requested", "ci_failed", "approved", "changes_requested"]
+  },
+  "sweep": {
+    "enabled": true,
+    "minIntervalMinutes": 45,
+    "maxPerDay": 10,
+    "maxBudgetUsd": 2.0
+  }
+}

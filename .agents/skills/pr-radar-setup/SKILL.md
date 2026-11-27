@@ -26,7 +26,7 @@ each person sets it up on their own machine.
    - Merge what authoring and reviewing both show. Weight an area by how much of their work lands there and how specialised it is. Lockfile churn isn't an area.
    - Repos get restructured (in runn, `app/` moved to `apps/rails/app/`), so cover both the old and the new paths.
 3. Check CODEOWNERS in the main repos (`git show origin/development:.github/CODEOWNERS` in runn) for teams that own those paths.
-4. Write `users/<login>/profile.json`, copying the shape of `users/chillu/profile.json`:
+4. Write `users/<login>/profile.json`, copying the shape of the made-up example in `users/sample/profile.json`:
    - `teams`: the teams whose requests should count as asking this person. Leave out org-wide teams like `developers`.
    - `repos` and `people`: weights from 0 to 1.
    - `ignoreRepos`, `minReviewScore`, `maxReview`, `maxTeam`.
